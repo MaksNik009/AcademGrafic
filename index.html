@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>АкадемГрафик — Система дежурств</title>
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232C3E50'/%3E%3Crect x='10' y='18' width='44' height='34' rx='4' fill='white' opacity='0.12'/%3E%3Crect x='10' y='18' width='44' height='10' rx='4' fill='%234A90D9'/%3E%3Ccircle cx='20' cy='15' r='3' fill='%234A90D9'/%3E%3Ccircle cx='44' cy='15' r='3' fill='%234A90D9'/%3E%3Crect x='16' y='34' width='8' height='2' rx='1' fill='white' opacity='0.7'/%3E%3Crect x='28' y='34' width='8' height='2' rx='1' fill='white' opacity='0.7'/%3E%3Crect x='40' y='34' width='8' height='2' rx='1' fill='white' opacity='0.7'/%3E%3Crect x='16' y='41' width='8' height='2' rx='1' fill='white' opacity='0.7'/%3E%3Crect x='28' y='41' width='8' height='2' rx='1' fill='white' opacity='0.7'/%3E%3Crect x='40' y='41' width='8' height='2' rx='1' fill='%234A90D9' opacity='0.9'/%3E%3C/svg%3E">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+  <!-- Supabase JS SDK v2 (UMD — экспортирует window.supabase) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+  <!-- ★ Sticky top wrapper: statusbar + header прикреплены к верху единым блоком -->
+  <div class="topbar-sticky">
+
+  <!-- ★ Supabase realtime status bar -->
+  <div class="sb-statusbar" id="sbStatusbar">
+    <span class="sb-status-dot" id="sbDot"></span>
+    <span class="sb-status-text" id="sbStatusText">Supabase: подключение…</span>
+    <span class="sb-status-sep">|</span>
+    <span style="opacity:.7;font-size:.68rem">6-дневная рабочая неделя (Пн–Сб)</span>
+    <button class="sb-status-close" id="sbStatusClose" title="Скрыть">✕</button>
+  </div>
+
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+
+  <!-- ══ HEADER ══ -->
+  <header class="site-header" id="siteHeader" role="banner">
+    <div class="header-inner">
+
+      <a class="logo" href="#" aria-label="АкадемГрафик — главная страница">
+        <div class="logo-icon" aria-hidden="true">
+          <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="44" height="44" rx="11" fill="#2C3E50"/>
+            <rect x="7" y="13" width="30" height="24" rx="3.5" fill="white" opacity="0.1"/>
+            <rect x="7" y="13" width="30" height="9" rx="3.5" fill="#4A90D9"/>
+            <line x1="7" y1="22" x2="37" y2="22" stroke="#4A90D9" stroke-width="0.5"/>
+            <rect x="14" y="10" width="3" height="6" rx="1.5" fill="#4A90D9"/>
+            <rect x="27" y="10" width="3" height="6" rx="1.5" fill="#4A90D9"/>
+            <rect x="11" y="27" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+            <rect x="19.5" y="27" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+            <rect x="28" y="27" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+            <rect x="11" y="32" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+            <rect x="19.5" y="32" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+            <rect x="28" y="32" width="5" height="2" rx="1" fill="#4A90D9"/>
+          </svg>
+        </div>
+        <div class="logo-text">
+          <span class="logo-name">АкадемГрафик</span>
+          <span class="logo-tagline">Планирование дежурств</span>
+        </div>
+      </a>
+
+      <nav class="header-nav" role="navigation" aria-label="Основная навигация">
+        <button class="nav-btn active" data-tab="calendar" aria-current="page">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+            <rect x="2" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M2 8h16" stroke="currentColor" stroke-width="1.6"/>
+            <circle cx="7" cy="12.5" r="1" fill="currentColor"/><circle cx="10" cy="12.5" r="1" fill="currentColor"/><circle cx="13" cy="12.5" r="1" fill="currentColor"/>
+            <path d="M7 4V2M13 4V2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Календарь
+        </button>
+        <button class="nav-btn admin-only" data-tab="teachers">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+            <circle cx="8" cy="7" r="3" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M2 17c0-3.314 2.686-5 6-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <circle cx="14.5" cy="13.5" r="2.8" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M14.5 11.2v4.6M12.2 13.5h4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Преподаватели
+        </button>
+        <button class="nav-btn" data-tab="stats">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+            <rect x="3" y="11" width="3.5" height="7" rx="1" fill="currentColor" opacity="0.45"/>
+            <rect x="8.25" y="7" width="3.5" height="11" rx="1" fill="currentColor" opacity="0.7"/>
+            <rect x="13.5" y="3" width="3.5" height="15" rx="1" fill="currentColor"/>
+          </svg>
+          Статистика
+        </button>
+        <!-- ★ Teacher cabinet tab -->
+        <button class="nav-btn teacher-only" data-tab="cabinet">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+            <circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M3 18c0-3.866 3.134-7 7-7s7 3.134 7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Мой кабинет
+        </button>
+      </nav>
+
+      <div class="header-cta">
+        <!-- ★ Role switcher -->
+        <div class="role-switcher" title="Переключить режим">
+          <span class="role-label">Режим:</span>
+          <button class="role-btn role-btn--admin active" id="roleAdmin" aria-pressed="true">
+            <svg viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M8 2a3 3 0 100 6 3 3 0 000-6zM3 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13 6l1.5 1.5L11 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Завуч
+          </button>
+          <button class="role-btn role-btn--teacher" id="roleTeacher" aria-pressed="false">
+            <svg viewBox="0 0 16 16" fill="none" width="12" height="12"><circle cx="8" cy="6" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M3 14c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            Препод.
+          </button>
+        </div>
+
+        <!-- ★ Notification bell -->
+        <div class="notif-wrap">
+          <button class="notif-btn" id="notifBtn" aria-label="Уведомления">
+            <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+              <path d="M10 2a6 6 0 00-6 6v3l-1.5 2.5h15L16 11V8a6 6 0 00-6-6z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8.5 16.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <span class="notif-dot" id="notifDot" aria-hidden="true"></span>
+          </button>
+          <div class="notif-panel" id="notifPanel" role="dialog" aria-label="Уведомления">
+            <div class="notif-header">
+              <span class="notif-title">Уведомления</span>
+              <button class="notif-clear-all" id="notifClearAll">Очистить</button>
+            </div>
+            <div class="notif-list" id="notifList">
+              <div class="notif-empty">Нет новых уведомлений</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Print button -->
+        <button class="btn-print" id="printBtn" title="Распечатать график">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+            <path d="M5 7V3h10v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <rect x="2" y="7" width="16" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M5 12h10M5 15h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <circle cx="15" cy="10" r="1" fill="currentColor"/>
+          </svg>
+          Печать
+        </button>
+        <button class="btn-auto admin-only" id="autoDistributeBtn">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+            <path d="M10 2.5l2.1 4.8 5.1.4-3.8 3.3 1.2 5-4.6-2.8-4.6 2.8 1.2-5L2.8 7.7l5.1-.4L10 2.5z" fill="currentColor"/>
+          </svg>
+          Авто&#8209;распределение
+        </button>
+
+        <!-- ★ Hamburger (mobile) -->
+        <button class="hamburger" id="hamburger" aria-label="Меню" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- ★ Mobile nav drawer -->
+    <div class="mobile-nav" id="mobileNav" aria-hidden="true">
+      <button class="mob-nav-btn active" data-tab="calendar">📅 Календарь</button>
+      <button class="mob-nav-btn admin-only" data-tab="teachers">👥 Преподаватели</button>
+      <button class="mob-nav-btn" data-tab="stats">📊 Статистика</button>
+      <button class="mob-nav-btn teacher-only" data-tab="cabinet">👤 Мой кабинет</button>
+    </div>
+  </header>
+
+  </div><!-- /.topbar-sticky -->
+  <div class="print-header" id="printHeader" aria-hidden="true">
+    <div class="print-logo">
+      <svg viewBox="0 0 44 44" fill="none" width="36" height="36">
+        <rect width="44" height="44" rx="11" fill="#2C3E50"/>
+        <rect x="7" y="13" width="30" height="9" rx="3.5" fill="#4A90D9"/>
+        <rect x="11" y="27" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+        <rect x="19.5" y="27" width="5" height="2" rx="1" fill="white" opacity="0.65"/>
+        <rect x="28" y="32" width="5" height="2" rx="1" fill="#4A90D9"/>
+      </svg>
+      <div>
+        <div class="print-logo-name">АкадемГрафик</div>
+        <div class="print-logo-sub">Система планирования дежурств</div>
+      </div>
+    </div>
+    <div class="print-meta">
+      <div class="print-month" id="printMonth"></div>
+      <div class="print-date">Распечатано: <span id="printDate"></span></div>
+    </div>
+  </div>
+
+  <!-- ══ MAIN ══ -->
+  <main class="app-main" id="main-content">
+
+    <!-- ── CALENDAR ── -->
+    <section class="tab-panel active" id="tab-calendar" role="tabpanel">
+
+      <div class="calendar-topbar no-print">
+        <div class="month-nav">
+          <button class="cal-arrow" id="prevMonth" aria-label="Предыдущий месяц">
+            <svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M12.5 5L7.5 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <h2 class="month-title" id="monthTitle" aria-live="polite">Апрель 2026</h2>
+          <button class="cal-arrow" id="nextMonth" aria-label="Следующий месяц">
+            <svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M7.5 5l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="legend">
+          <span class="legend-item"><span class="legend-dot legend-dot--assigned" aria-hidden="true"></span>Назначен</span>
+          <span class="legend-item"><span class="legend-dot legend-dot--today" aria-hidden="true"></span>Сегодня</span>
+          <span class="legend-item"><span class="legend-dot legend-dot--free" aria-hidden="true"></span>Свободно</span>
+          <span class="legend-item"><span class="legend-dot legend-dot--holiday" aria-hidden="true"></span>Праздник</span>
+          <span class="legend-item"><span class="legend-dot legend-dot--replace" aria-hidden="true"></span>Нужна замена</span>
+          <span class="legend-item"><span class="legend-dot legend-dot--blackout" aria-hidden="true"></span>Нежелательный</span>
+        </div>
+      </div>
+
+      <div class="calendar-card desktop-cal">
+        <div class="weekday-header" aria-hidden="true">
+          <span>Пн</span><span>Вт</span><span>Ср</span>
+          <span>Чт</span><span>Пт</span>
+          <span class="weekend">Сб</span>
+          <span class="sunday-header">Вс</span>
+        </div>
+        <div class="calendar-grid" id="calendarGrid" aria-label="Сетка дежурств"></div>
+      </div>
+
+      <!-- ★ Mobile accordion -->
+      <div class="cal-accordion" id="calAccordion"></div>
+
+    </section>
+
+    <!-- ── TEACHERS ── -->
+    <section class="tab-panel" id="tab-teachers" role="tabpanel">
+      <!-- ★ Toolbar with popup button -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:.75rem">
+        <h2 class="section-heading" style="font-size:1.4rem">Преподаватели</h2>
+        <button class="btn btn--primary" id="openAddTeacherBtn">+ Добавить преподавателя</button>
+      </div>
+      <div class="teachers-layout">
+
+        <aside class="card">
+          <div class="card-header">
+            <h3 class="card-title">Добавить преподавателя</h3>
+          </div>
+          <div class="card-body">
+            <div class="field-group">
+              <label class="field-label" for="teacherName">ФИО <span class="required" aria-hidden="true">*</span></label>
+              <input class="field-input" type="text" id="teacherName"
+                     placeholder="Иванов Иван Иванович"
+                     autocomplete="name" aria-required="true"/>
+            </div>
+
+            <!-- ★ NEW: Department dropdown -->
+            <div class="field-group">
+              <label class="field-label" for="teacherDept">Кафедра <span class="required" aria-hidden="true">*</span></label>
+              <div class="select-wrap">
+                <select class="field-input field-select" id="teacherDept" aria-required="true">
+                  <option value="">— выберите кафедру —</option>
+                  <option>Кафедра информатики и ВТ</option>
+                  <option>Кафедра математики</option>
+                  <option>Кафедра физики</option>
+                  <option>Кафедра химии и биологии</option>
+                  <option>Кафедра истории и обществознания</option>
+                  <option>Кафедра русского языка и литературы</option>
+                  <option>Кафедра иностранных языков</option>
+                  <option>Кафедра физической культуры</option>
+                  <option>Кафедра экономики и права</option>
+                  <option>Кафедра психологии и педагогики</option>
+                </select>
+                <svg class="select-arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <!-- Optional: type your own -->
+              <input class="field-input field-input--sm" type="text" id="teacherDeptCustom"
+                     placeholder="или введите свою кафедру…"/>
+            </div>
+
+            <!-- ★ NEW: Phone field -->
+            <div class="field-group">
+              <label class="field-label" for="teacherPhone">Контактный телефон</label>
+              <div class="field-icon-wrap">
+                <svg class="field-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">
+                  <path d="M3 2.5A1.5 1.5 0 014.5 1h.879a1 1 0 01.95.684l.74 2.217a1 1 0 01-.23 1.03L5.4 5.87a8.001 8.001 0 004.73 4.73l.94-1.44a1 1 0 011.03-.23l2.217.74A1 1 0 0115 10.62V11.5A1.5 1.5 0 0113.5 13C6.596 13 1 7.404 1 .5A1.5 1.5 0 012.5 2h1z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                </svg>
+                <input class="field-input field-input--icon" type="tel" id="teacherPhone"
+                       placeholder="+7 (___) ___-__-__"
+                       autocomplete="tel"/>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="teacherLoad">Макс. нагрузка</label>
+              <div class="field-row">
+                <input class="field-input field-input--narrow" type="number"
+                       id="teacherLoad" min="1" max="5" value="2"/>
+                <span class="field-unit">дн / нед</span>
+              </div>
+            </div>
+
+            <button class="btn btn--primary btn--full" id="addTeacherBtn">+ Добавить преподавателя</button>
+          </div>
+        </aside>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Список преподавателей</h3>
+            <div style="display:flex;align-items:center;gap:.5rem">
+              <span class="count-badge" id="teacherCount" aria-live="polite">0</span>
+              <button class="btn btn--outline" id="seedDemoBtn"
+                      style="font-size:.72rem;padding:.3rem .7rem;opacity:.75"
+                      title="Загрузить 10 демо-преподавателей в Supabase">🧪 Демо</button>
+            </div>
+          </div>
+          <div class="teachers-list" id="teachersList" aria-live="polite"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── STATS ── -->
+    <section class="tab-panel" id="tab-stats" role="tabpanel">
+      <div class="stats-topbar">
+        <h2 class="section-heading">Статистика дежурств</h2>
+        <div class="stats-actions">
+          <div class="load-legend">
+            <span class="load-legend-item"><span class="load-dot load-dot--ok"></span>Норма</span>
+            <span class="load-legend-item"><span class="load-dot load-dot--warn"></span>Высокая</span>
+            <span class="load-legend-item"><span class="load-dot load-dot--over"></span>Перебор</span>
+          </div>
+          <button class="btn btn--outline-danger" id="clearAllBtn">Очистить расписание</button>
+        </div>
+      </div>
+      <div class="stats-grid" id="statsGrid" aria-live="polite"></div>
+    </section>
+
+    <!-- ★ MY CABINET tab (teacher mode) -->
+    <section class="tab-panel teacher-only" id="tab-cabinet" role="tabpanel">
+      <div class="cabinet-layout">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Мои дежурства в этом месяце</h3></div>
+          <div class="my-duties-list" id="myDutiesList"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">🚫 Нежелательные даты</h3></div>
+          <div class="card-body">
+            <p style="font-size:.875rem;color:var(--text-muted);line-height:1.55">Укажите даты, в которые нежелательно дежурить. Алгоритм пропустит их при авто-распределении.</p>
+            <div class="blackout-input-row">
+              <input type="date" class="field-input" id="blackoutDateInput" aria-label="Нежелательная дата"/>
+              <button class="btn btn--primary" id="addBlackoutBtn">Добавить</button>
+            </div>
+            <div class="blackout-list" id="blackoutList"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+  <div class="modal-overlay" id="teacherModalOverlay" role="dialog" aria-modal="true" aria-labelledby="teacherModalTitle" aria-hidden="true">
+    <div class="modal modal--wide">
+      <div class="modal-header">
+        <h3 class="modal-title" id="teacherModalTitle">Добавить преподавателя</h3>
+        <button class="modal-close" id="teacherModalClose" aria-label="Закрыть">
+          <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field-group field-group--wide">
+            <label class="field-label" for="tName">ФИО <span class="required">*</span></label>
+            <input class="field-input" type="text" id="tName" placeholder="Иванов Иван Иванович" autocomplete="name"/>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="tDeptSel">Кафедра <span class="required">*</span></label>
+            <div class="select-wrap">
+              <select class="field-input field-select" id="tDeptSel">
+                <option value="">— выберите —</option>
+                <option>Кафедра информатики и ВТ</option>
+                <option>Кафедра математики</option>
+                <option>Кафедра физики</option>
+                <option>Кафедра химии и биологии</option>
+                <option>Кафедра истории и обществознания</option>
+                <option>Кафедра русского языка и литературы</option>
+                <option>Кафедра иностранных языков</option>
+                <option>Кафедра физической культуры</option>
+                <option>Кафедра экономики и права</option>
+                <option>Кафедра психологии и педагогики</option>
+              </select>
+              <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <input class="field-input field-input--sm" type="text" id="tDeptCustom" placeholder="или введите свою кафедру…"/>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="tPhone">Телефон</label>
+            <div class="field-icon-wrap">
+              <svg class="field-icon" viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M3 2.5A1.5 1.5 0 014.5 1h.879a1 1 0 01.95.684l.74 2.217a1 1 0 01-.23 1.03L5.4 5.87a8.001 8.001 0 004.73 4.73l.94-1.44a1 1 0 011.03-.23l2.217.74A1 1 0 0115 10.62V11.5A1.5 1.5 0 0113.5 13C6.596 13 1 7.404 1 .5A1.5 1.5 0 012.5 2h1z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              <input class="field-input field-input--icon" type="tel" id="tPhone" placeholder="+7 (___) ___-__-__" autocomplete="tel"/>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="tLoad">Макс. нагрузка</label>
+            <div class="field-row">
+              <input class="field-input field-input--narrow" type="number" id="tLoad" min="1" max="5" value="2"/>
+              <span class="field-unit">дн / нед</span>
+            </div>
+          </div>
+        </div>
+        <input type="hidden" id="tEditId"/>
+        <!-- ★ Нежелательные даты — заполняется из JS -->
+        <div id="tBlackoutSection"></div>
+        <div class="modal-actions" style="margin-top:1.25rem">
+          <button class="btn-modal-clear" id="teacherModalCancel">Отмена</button>
+          <button class="btn-modal-save" id="teacherModalSave">Сохранить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MODAL: Assignment ══ -->
+  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Назначить дежурного</h3>
+        <button class="modal-close" id="modalClose" aria-label="Закрыть окно">
+          <svg viewBox="0 0 20 20" fill="none" width="16" height="16" aria-hidden="true">
+            <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- ══ TOAST ══ -->
+  <div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
