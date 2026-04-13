@@ -763,12 +763,157 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   .month-title { font-size: 1.3rem; min-width: auto; }
 }
 
-@media (max-width: 480px) {
-  .header-inner { padding: 0 .875rem; gap: .5rem; }
+/* ══════════════════════════════════════════════════
+   ★ MOBILE FIXES — все экраны до 768px
+   ══════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* 1. Контейнер: отступы чтобы не прилипало к краям */
+  .app-main {
+    padding: 10px !important;
+  }
+
+  /* 2. Шапка: лого + роли в один ряд, авто-кнопка — только иконка */
+  .header-inner {
+    padding: 0 10px;
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .logo-tagline { display: none; }
   .logo-name { font-size: 1rem; }
-  .btn-auto { padding: 8px 10px; font-size: .78rem; }
-  .stats-actions { flex-direction: column; align-items: flex-start; gap: .5rem; }
-  .toast { left: 1rem; right: 1rem; min-width: unset; }
+  .logo-icon svg { width: 32px; height: 32px; }
+
+  /* Роль-свитчер компактнее */
+  .role-switcher { padding: 3px; gap: 2px; }
+  .role-btn { padding: 5px 10px; font-size: .72rem; }
+  .role-label { display: none; }
+
+  /* Авто-распределение: только иконка на мобильном */
+  .btn-auto-label { display: none; }
+  .btn-auto {
+    padding: 8px 12px;
+    gap: 0;
+  }
+  /* Печать — только иконка */
+  .btn-print-label { display: none; }
+  .btn-print { padding: 7px 10px; }
+
+  /* Уведомление — компактно */
+  .notif-panel { right: 0; width: calc(100vw - 20px); max-width: 340px; }
+
+  /* 3. Легенда: горизонтальная прокрутка в одну строку */
+  .legend {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .legend::-webkit-scrollbar { display: none; }
+  .legend-item {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    gap: 5px;
+    white-space: nowrap;
+  }
+
+  /* 4. Аккордеон — карточки на всю ширину */
+  .cal-accordion {
+    gap: 6px;
+  }
+  .acc-week {
+    border-radius: var(--radius-sm);
+  }
+  .acc-week-header {
+    padding: 10px 12px;
+  }
+  .acc-week-label { font-size: .78rem; }
+
+  /* Строка дня — не сжимать текст */
+  .acc-day-row {
+    padding: 10px 12px;
+    gap: 10px;
+    align-items: flex-start;
+    flex-wrap: nowrap;
+    min-height: auto;
+  }
+  .acc-day-date {
+    min-width: 40px;
+    flex-shrink: 0;
+  }
+  .acc-day-num { font-size: 1.15rem; }
+  .acc-day-wd  { font-size: .58rem; }
+
+  .acc-day-content {
+    flex: 1;
+    min-width: 0;
+  }
+  .acc-duty-chip {
+    padding: 6px 10px;
+  }
+
+  /* ФИО — 1.1rem, не обрезается */
+  .acc-duty-name {
+    font-size: 1.1rem !important;
+    white-space: normal;
+    word-break: break-word;
+  }
+  /* Кафедра и телефон — 0.9rem */
+  .acc-duty-dept,
+  .acc-blackout-tag {
+    font-size: 0.9rem !important;
+    white-space: normal;
+  }
+  .acc-duty-chip .chip-phone,
+  .acc-duty-chip [class*="phone"] {
+    font-size: 0.9rem !important;
+  }
+
+  /* Кнопка «..» в строке — не уходит за экран */
+  .acc-day-action { flex-shrink: 0; }
+  .acc-action-btn { padding: 5px 8px; font-size: .68rem; }
+
+  /* Топбар календаря — кнопки не перекрываются */
+  .calendar-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 1rem;
+  }
+  .month-nav { gap: 8px; }
+  .month-title { font-size: 1.2rem; min-width: 0; }
+
+  /* Статистика */
+  .stats-topbar { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .stats-actions { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  /* Кабинет преподавателя */
+  .cabinet-layout { grid-template-columns: 1fr; }
+  .blackout-input-row { flex-direction: column; }
+
+  /* Модалы — на весь экран */
+  .modal, .modal--wide {
+    margin: 0;
+    max-width: 100%;
+    width: 100%;
+    border-radius: var(--radius) var(--radius) 0 0;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal-overlay {
+    align-items: flex-end;
+  }
+
+  /* Форма преподавателя */
+  .form-grid { grid-template-columns: 1fr; }
+  .field-group--wide { grid-column: 1; }
+
+  /* Toast */
+  .toast { left: 10px; right: 10px; min-width: unset; }
 }
 
 /* Print update: hide accordion */
