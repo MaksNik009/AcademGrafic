@@ -58,9 +58,11 @@
 
 /* ── RESET ───────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; -webkit-text-size-adjust: 100%; scroll-behavior: smooth; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-text-size-adjust: 100%; scroll-behavior: smooth; margin: 0; padding: 0;
+       width: 100%; overflow-x: hidden; }
 body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
-       color: var(--text-primary); background: var(--bg); min-height: 100vh; margin: 0; padding: 0; }
+       color: var(--text-primary); background: var(--bg); min-height: 100vh; margin: 0; padding: 0;
+       width: 100%; overflow-x: hidden; }
 
 /* ── ACCESSIBILITY ───────────────────────────────── */
 .skip-link {
@@ -80,6 +82,8 @@ body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
   z-index: 100;
   margin: 0;
   padding: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* ── HEADER ──────────────────────────────────────── */
@@ -143,7 +147,7 @@ body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
 .btn-auto:active { transform: none; box-shadow: none; }
 
 /* ── MAIN ────────────────────────────────────────── */
-.app-main { max-width: 1360px; margin: 0 auto; padding: 2rem; }
+.app-main { max-width: 1360px; width: 100%; margin: 0 auto; padding: 2rem; box-sizing: border-box; }
 
 /* ── TABS ────────────────────────────────────────── */
 .tab-panel { display: none; }
@@ -241,6 +245,41 @@ body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
 
 .add-hint { margin-top: auto; font-size: 0.72rem; color: var(--text-faint); opacity: 0; transition: opacity 0.18s; font-family: var(--font-mono); }
 .day-cell:hover .add-hint { opacity: 1; }
+/* "Добавить ещё" — всегда чуть видна, ярче при ховере */
+.add-hint--more {
+  opacity: 0.5;
+  color: var(--blue);
+  font-size: 0.7rem;
+  margin-top: 4px;
+}
+.day-cell:hover .add-hint--more { opacity: 1; }
+
+/* Modal: список уже назначенных */
+.modal-assigned-list {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-bottom: 1rem;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.modal-assigned-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.modal-assigned-name {
+  flex: 1; font-size: .875rem; font-weight: 500; color: var(--text-primary);
+}
+.modal-remove-one {
+  background: transparent; border: none; color: var(--text-faint);
+  cursor: pointer; font-size: .85rem; padding: 2px 5px;
+  border-radius: var(--radius-sm); transition: color .15s, background .15s;
+}
+.modal-remove-one:hover { color: var(--danger); background: var(--danger-bg); }
+.modal-section-label {
+  font-family: var(--font-mono); font-size: .72rem; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
+  margin-bottom: .5rem;
+}
 
 /* ── CARDS ───────────────────────────────────────── */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
@@ -684,8 +723,8 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 .legend-dot--blackout{ background: var(--blackout-border); }
 
 /* ── MOBILE ACCORDION ── */
-.cal-accordion { display: none; flex-direction: column; gap: 8px; }
-.acc-week { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-xs); }
+.cal-accordion { display: none; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; }
+.acc-week { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-xs); width: 100%; box-sizing: border-box; }
 .acc-week-header { display:flex;align-items:center;justify-content:space-between;padding:11px 15px;cursor:pointer;user-select:none;background:var(--surface-2);transition:background .15s; }
 .acc-week-header:hover { background: var(--surface-3); }
 .acc-week-label { font-family:var(--font-mono);font-size:.8rem;font-weight:600;color:var(--navy); }
