@@ -127,8 +127,8 @@
           </div>
         </div>
 
-        <!-- Print button -->
-        <button class="btn-print" id="printBtn" title="Распечатать график">
+        <!-- Print button (hidden on mobile) -->
+        <button class="btn-print no-mobile" id="printBtn" title="Распечатать график">
           <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
             <path d="M5 7V3h10v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             <rect x="2" y="7" width="16" height="9" rx="2" stroke="currentColor" stroke-width="1.6"/>
@@ -217,6 +217,23 @@
         </div>
         <div class="calendar-grid" id="calendarGrid" aria-label="Сетка дежурств"></div>
       </div>
+
+      <!-- ★ Day Detail Panel -->
+      <div class="day-panel-backdrop" id="dayPanelBackdrop"></div>
+      <aside class="day-panel" id="dayPanel" aria-label="Детали дня">
+        <div class="day-panel-header">
+          <h3 class="day-panel-title">—</h3>
+          <button class="day-panel-close" id="dayPanelClose" aria-label="Закрыть панель">
+            <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="day-panel-body">
+          <div class="day-panel-duty-strip"></div>
+          <div class="day-panel-divider"></div>
+          <div class="day-panel-section-label">Расписание пар</div>
+          <div class="day-panel-pairs"></div>
+        </div>
+      </aside>
 
       <!-- ★ Mobile accordion -->
       <div class="cal-accordion" id="calAccordion"></div>
@@ -364,26 +381,8 @@
             <label class="field-label" for="tName">ФИО <span class="required">*</span></label>
             <input class="field-input" type="text" id="tName" placeholder="Иванов Иван Иванович" autocomplete="name"/>
           </div>
-          <div class="field-group">
-            <label class="field-label" for="tDeptSel">Кафедра <span class="required">*</span></label>
-            <div class="select-wrap">
-              <select class="field-input field-select" id="tDeptSel">
-                <option value="">— выберите —</option>
-                <option>Кафедра информатики и ВТ</option>
-                <option>Кафедра математики</option>
-                <option>Кафедра физики</option>
-                <option>Кафедра химии и биологии</option>
-                <option>Кафедра истории и обществознания</option>
-                <option>Кафедра русского языка и литературы</option>
-                <option>Кафедра иностранных языков</option>
-                <option>Кафедра физической культуры</option>
-                <option>Кафедра экономики и права</option>
-                <option>Кафедра психологии и педагогики</option>
-              </select>
-              <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <input class="field-input field-input--sm" type="text" id="tDeptCustom" placeholder="или введите свою кафедру…"/>
-          </div>
+          <!-- ★ Multi-department manager — заполняется из JS -->
+          <div class="field-group field-group--wide" id="tDeptsSection"></div>
           <div class="field-group">
             <label class="field-label" for="tPhone">Телефон</label>
             <div class="field-icon-wrap">
@@ -394,7 +393,7 @@
           <div class="field-group">
             <label class="field-label" for="tLoad">Макс. нагрузка</label>
             <div class="field-row">
-              <input class="field-input field-input--narrow" type="number" id="tLoad" min="1" max="5" value="2"/>
+              <input class="field-input field-input--narrow" type="number" id="tLoad" min="1" max="6" value="2"/>
               <span class="field-unit">дн / нед</span>
             </div>
           </div>
@@ -422,6 +421,19 @@
         </button>
       </div>
       <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- ══ MODAL: Teacher Info ══ -->
+  <div class="modal-overlay" id="teacherInfoOverlay" role="dialog" aria-modal="true" aria-labelledby="teacherInfoTitle" aria-hidden="true">
+    <div class="modal modal--narrow">
+      <div class="modal-header">
+        <h3 class="modal-title" id="teacherInfoTitle">О преподавателе</h3>
+        <button class="modal-close" id="teacherInfoClose" aria-label="Закрыть">
+          <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="teacherInfoBody"></div>
     </div>
   </div>
 

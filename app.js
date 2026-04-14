@@ -66,12 +66,14 @@ const State = {
   replaceRequests: {},    // { "YYYY-MM-DD": true }
   blackoutDates: {},      // { teacherId: ["YYYY-MM-DD", …] }
   notifications: [],      // [{ id, msg, icon, time }]
+  lessons: {},            // { "YYYY-MM-DD": { "1":[{tid,dept,room}], ..., "6":[...] } }
   currentRole: 'admin',   // 'admin' | 'teacher'
   currentTeacherId: null,
   currentDate: new Date(),
   selectedCell: null,
   selectedTeacherId: null,
   modalMode: 'assign',
+  activeDayKey: null,     // открытая боковая панель
 
   avatarColors: [
     '#2C6FAC','#1A7A4A','#8E44AD','#C0392B',
@@ -80,13 +82,13 @@ const State = {
   ],
 
   save() {
-    // Always keep localStorage as offline fallback
     try {
       localStorage.setItem('ag_teachers',  JSON.stringify(this.teachers));
       localStorage.setItem('ag_duties',    JSON.stringify(this.duties));
       localStorage.setItem('ag_replace',   JSON.stringify(this.replaceRequests));
       localStorage.setItem('ag_blackout',  JSON.stringify(this.blackoutDates));
       localStorage.setItem('ag_notifs',    JSON.stringify(this.notifications));
+      localStorage.setItem('ag_lessons',   JSON.stringify(this.lessons));
     } catch(e) { console.warn('LocalStorage save failed', e); }
   },
 
@@ -97,11 +99,13 @@ const State = {
       const r = localStorage.getItem('ag_replace');
       const b = localStorage.getItem('ag_blackout');
       const n = localStorage.getItem('ag_notifs');
+      const l = localStorage.getItem('ag_lessons');
       if (t) this.teachers        = JSON.parse(t);
       if (d) this.duties          = JSON.parse(d);
       if (r) this.replaceRequests = JSON.parse(r);
       if (b) this.blackoutDates   = JSON.parse(b);
       if (n) this.notifications   = JSON.parse(n);
+      if (l) this.lessons         = JSON.parse(l);
     } catch(e) { console.warn('Load failed', e); }
   }
 };
@@ -144,27 +148,49 @@ function getWeekKeys(dateStr) {
   });
 }
 // ─── MULTI-DUTY HELPERS ───────────────────────────────────────────────────────
-// duties[key] теперь всегда массив строк (id преподавателей)
+// duties[key] — массив, каждый элемент может быть строкой (legacy) или {tid, dept}
 
-/** Возвращает массив ID дежурных для даты (никогда не бросает) */
-function getDutyIds(key) {
+/** Нормализует запись к {tid, dept} */
+function normEntry(entry) {
+  if (typeof entry === 'string') return { tid: entry, dept: null };
+  return { tid: entry.tid || entry.id || '', dept: entry.dept || null };
+}
+
+/** Возвращает массив нормализованных записей для даты */
+function getDutyEntries(key) {
   const v = State.duties[key];
   if (!v) return [];
-  return Array.isArray(v) ? v : [v];   // обратная совместимость со старыми данными
+  const arr = Array.isArray(v) ? v : [v];
+  return arr.map(normEntry);
 }
 
-/** Добавляет преподавателя к дежурству (без дублей) */
-function addDuty(key, tid) {
-  const ids = getDutyIds(key);
-  if (!ids.includes(tid)) ids.push(tid);
-  State.duties[key] = ids;
+/** Возвращает только массив teacher IDs (для обратной совместимости) */
+function getDutyIds(key) {
+  return getDutyEntries(key).map(e => e.tid);
 }
 
-/** Удаляет конкретного преподавателя из дежурства; если список пуст — удаляет ключ */
-function removeDuty(key, tid) {
-  const ids = getDutyIds(key).filter(id => id !== tid);
-  if (ids.length) State.duties[key] = ids;
-  else            delete State.duties[key];
+/**
+ * Добавляет преподавателя к дежурству.
+ * Один и тот же tid может появляться несколько раз с разными dept.
+ */
+function addDuty(key, tid, dept = null) {
+  const entries = getDutyEntries(key);
+  // Если тот же tid + та же dept — не дублируем
+  const alreadySame = entries.some(e => e.tid === tid && (e.dept || null) === (dept || null));
+  if (!alreadySame) entries.push({ tid, dept: dept || null });
+  State.duties[key] = entries;
+}
+
+/** Удаляет конкретную запись (tid + dept) */
+function removeDuty(key, tid, dept = null) {
+  const entries = getDutyEntries(key).filter(e => {
+    if (e.tid !== tid) return true;
+    // Если dept передан — удаляем только совпадающую запись
+    if (dept !== null) return (e.dept || null) !== (dept || null);
+    return false;  // dept не задан — удаляем первое совпадение
+  });
+  if (entries.length) State.duties[key] = entries;
+  else delete State.duties[key];
 }
 
 /** Полностью очищает день */
@@ -397,82 +423,38 @@ function renderCalendar() {
       cell.appendChild(bi);
     }
 
-    // Duty chips — несколько преподавателей на день
-    const dutyIds = getDutyIds(key);
-    if (!isHoliday && dutyIds.length > 0) {
-      dutyIds.forEach(dutyId => {
-        const teacher = teacherById(dutyId);
+    // ── Compact avatar grid (no text) ─────────────────────────────────
+    const dutyEntries = getDutyEntries(key);
+    if (!isHoliday && dutyEntries.length > 0) {
+      const avatarGrid = document.createElement('div');
+      avatarGrid.className = 'cell-avatar-grid';
+      dutyEntries.forEach(entry => {
+        const teacher = teacherById(entry.tid);
         if (!teacher) return;
-        const idx   = teacherIndex(dutyId);
-        const color = getColor(idx);
-        const chip  = document.createElement('div');
-        chip.className = 'duty-chip';
-        const isReplaceThisTeacher = !!(State.replaceRequests[key + '_' + dutyId] || (dutyIds.length === 1 && State.replaceRequests[key]));
-        if (isReplaceThisTeacher) chip.classList.add('duty-chip--replace');
-        chip.style.borderLeftColor = color;
-        chip.style.background      = isReplaceThisTeacher ? '' : color + '14';
-        chip.style.borderColor     = isReplaceThisTeacher ? '' : color + '50';
-
-        const nameShort = teacher.name.split(' ').slice(0, 2).join(' ');
-        const replaceBadge = isReplaceThisTeacher
-          ? '<div class="replace-badge">🔄 Просит замену</div>' : '';
-
-        chip.innerHTML = `
-          <span class="chip-name">${nameShort}</span>
-          <span class="chip-dept">${teacher.dept}</span>
-          ${teacher.phone ? `<span class="chip-phone">${teacher.phone}</span>` : ''}
-          ${replaceBadge}`;
-
-        const canAdmin = State.currentRole === 'admin';
-        const isMyDuty = State.currentTeacherId === dutyId;
-
-        if (canAdmin || isMyDuty) {
-          const actions = document.createElement('div');
-          actions.className = 'chip-actions';
-          if (canAdmin) {
-            actions.innerHTML += `<button class="chip-action-btn danger" data-action="remove-one" data-tid="${dutyId}" data-key="${key}">✕ Убрать</button>`;
-          }
-          if (isMyDuty && State.currentRole === 'teacher') {
-            const isReq = !!State.replaceRequests[key];
-            actions.innerHTML += `<button class="chip-action-btn orange" data-action="toggle-replace" data-key="${key}">${isReq ? '↩ Отменить' : '🔄 Замена'}</button>`;
-          }
-          chip.appendChild(actions);
-        }
-        cell.appendChild(chip);
+        const color = getColor(teacherIndex(entry.tid));
+        const av = document.createElement('div');
+        av.className = 'cell-avatar';
+        av.style.background = color;
+        av.textContent = initials(teacher.name);
+        av.title = teacher.name + (entry.dept ? ' · ' + entry.dept : '');
+        av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
+        avatarGrid.appendChild(av);
       });
-    }
-
-    // Кнопка "+ Добавить ещё" (всегда видна в admin-режиме, не заблокирована)
-    if (!isHoliday && State.currentRole === 'admin') {
+      cell.appendChild(avatarGrid);
+    } else if (!isHoliday && State.currentRole === 'admin') {
       const hint = document.createElement('div');
-      hint.className = dutyIds.length > 0 ? 'add-hint add-hint--more' : 'add-hint';
-      hint.textContent = dutyIds.length > 0 ? '+ Добавить ещё' : '+ назначить';
-      hint.style.cursor = 'pointer';
-      hint.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openModal(key, d, m, y, 'assign');
-      });
+      hint.className = 'add-hint';
+      hint.textContent = '+';
       cell.appendChild(hint);
     }
 
     if (!isHoliday) {
       cell.addEventListener('click', (e) => {
-        const actionBtn = e.target.closest('.chip-action-btn');
-        if (actionBtn) {
-          e.stopPropagation();
-          handleChipAction(actionBtn.dataset.action, actionBtn.dataset.key, actionBtn.dataset.tid);
-          return;
-        }
-        // Клик по самой ячейке (не по чипу/хинту) — открываем модал только если нет назначений
-        if (State.currentRole === 'admin' && e.target.closest('.day-cell') === cell && !e.target.closest('.duty-chip') && !e.target.closest('.add-hint')) {
-          if (getDutyIds(key).length === 0) openModal(key, d, m, y, 'assign');
-        }
+        if (e.target.closest('.cell-avatar')) return; // аватар обрабатывается отдельно
+        openDayPanel(key);
       });
       cell.addEventListener('keydown', (e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && State.currentRole === 'admin') {
-          e.preventDefault();
-          openModal(key, d, m, y, 'assign');
-        }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); }
       });
     }
 
@@ -482,17 +464,18 @@ function renderCalendar() {
 
 // ─── CHIP ACTIONS ─────────────────────────────────────────────────────────────
 
-function handleChipAction(action, key, tid) {
+function handleChipAction(action, key, tid, actionBtn) {
   const [ky, km, kd] = key.split('-').map(Number);
 
   if (action === 'clear') {
     quickClear(key);
   } else if (action === 'remove-one' && tid) {
-    removeDuty(key, tid);
+    const dept = actionBtn?.dataset?.dept || null;
+    removeDuty(key, tid, dept || null);
     State.save();
     renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
     showToast('Преподаватель снят с дежурства', 'info');
-    saveScheduleRemoveOne(key, tid);   // async, не блокируем UI
+    saveScheduleRemoveOne(key, tid);
   } else if (action === 'replace') {
     openModal(key, kd, km - 1, ky, 'assign');
   } else if (action === 'toggle-replace') {
@@ -594,7 +577,8 @@ function renderAccordion() {
       const isHoliday   = !!getHolidayName(key);
       const isToday     = key === today;
       const isReplace   = !!State.replaceRequests[key];
-      const dutyIds     = getDutyIds(key);
+      const dutyEntries = getDutyEntries(key);
+      const dutyIds     = dutyEntries.map(e => e.tid);
       const tid         = State.currentTeacherId;
       const myBlackout  = tid && (State.blackoutDates[tid] || []).includes(key);
 
@@ -608,19 +592,20 @@ function renderAccordion() {
       let contentHtml = '';
       if (isHoliday) {
         contentHtml = `<div class="acc-holiday-tag">🏛 ${getHolidayName(key)}</div>`;
-      } else if (dutyIds.length > 0) {
-        contentHtml = dutyIds.map(dutyId => {
-          const teacher = teacherById(dutyId);
+      } else if (dutyEntries.length > 0) {
+        contentHtml = dutyEntries.map(entry => {
+          const teacher = teacherById(entry.tid);
           if (!teacher) return '';
-          const idx = teacherIndex(dutyId);
+          const idx = teacherIndex(entry.tid);
           const color = getColor(idx);
-          const isMyDutyHere = dutyId === tid;
+          const isMyDutyHere = entry.tid === tid;
+          const deptLabel = entry.dept || teacher.dept || '';
           const replaceBadge = (isReplace && isMyDutyHere)
             ? '<div style="font-size:.68rem;color:var(--orange);margin-top:3px">🔄 Просит замену</div>' : '';
           return `<div class="acc-duty-chip${isReplace && isMyDutyHere ? ' replace' : ''}"
                style="border-left-color:${color};background:${isReplace && isMyDutyHere ? '' : color + '12'};border-color:${isReplace && isMyDutyHere ? '' : color + '40'};margin-bottom:4px">
             <div class="acc-duty-name">${teacher.name}</div>
-            <div class="acc-duty-dept">${teacher.dept}</div>
+            <div class="acc-duty-dept">${deptLabel}</div>
             ${teacher.phone ? `<div class="acc-duty-dept">${teacher.phone}</div>` : ''}
             ${replaceBadge}
           </div>`;
@@ -690,21 +675,27 @@ function openModal(key, day, month, year, mode = 'assign') {
   const prevKey  = shiftDay(key, -1);
   const nextKey  = shiftDay(key, +1);
   const weekKeys = getWeekKeys(key);
-  const assigned = getDutyIds(key);
+  const assignedEntries = getDutyEntries(key);
 
   let html = `<div class="modal-date-label">${String(day).padStart(2,'0')}.${String(month+1).padStart(2,'0')}.${year}</div>`;
 
-  // Список уже назначенных
-  if (assigned.length > 0) {
+  // Список уже назначенных (teacher + dept)
+  if (assignedEntries.length > 0) {
     html += `<div class="modal-assigned-list">`;
-    assigned.forEach(tid => {
-      const t = teacherById(tid);
+    assignedEntries.forEach(entry => {
+      const { tid: tid2, dept: dept2 } = entry;
+      const t = teacherById(tid2);
       if (!t) return;
-      const color = getColor(teacherIndex(tid));
+      const color = getColor(teacherIndex(tid2));
+      const deptLabel = dept2 || t.dept || '';
       html += `<div class="modal-assigned-row">
-        <div class="opt-avatar" style="background:${color};width:28px;height:28px;font-size:.7rem">${initials(t.name)}</div>
-        <span class="modal-assigned-name">${t.name.split(' ').slice(0,2).join(' ')}</span>
-        <button class="modal-remove-one" data-tid="${tid}" title="Снять">✕</button>
+        <div class="opt-avatar" style="background:${color};width:28px;height:28px;font-size:.7rem;cursor:pointer"
+             onclick="openTeacherInfoModal('${tid2}')" title="О преподавателе">${initials(t.name)}</div>
+        <div style="flex:1;min-width:0">
+          <span class="modal-assigned-name">${t.name.split(' ').slice(0,2).join(' ')}</span>
+          ${deptLabel ? `<span style="display:block;font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">${deptLabel}</span>` : ''}
+        </div>
+        <button class="modal-remove-one" data-tid="${tid2}" data-dept="${dept2||''}" title="Снять">✕</button>
       </div>`;
     });
     html += `</div>`;
@@ -720,28 +711,32 @@ function openModal(key, day, month, year, mode = 'assign') {
   } else {
     html += `<div class="teacher-options" role="listbox">`;
     State.teachers.forEach((t, idx) => {
-      const color       = getColor(idx);
-      const wc          = weekDutiesCount(t.id, weekKeys);
-      const overloaded  = wc >= t.maxLoad;
-      const consecutive = getDutyIds(prevKey).includes(t.id) || getDutyIds(nextKey).includes(t.id);
-      const alreadyHere = assigned.includes(t.id);
-      const selected    = State.selectedTeacherId === t.id;
+      const color      = getColor(idx);
+      const wc         = weekDutiesCount(t.id, weekKeys);
+      const overloaded = wc >= t.maxLoad;
+      const selected   = State.selectedTeacherId === t.id;
+      const depts      = Array.isArray(t.depts) && t.depts.length ? t.depts : [t.dept].filter(Boolean);
 
       let badge = '';
-      if (alreadyHere) badge = `<span class="conflict-tag" style="background:#EBF3FB;color:#2C6FAC">уже назначен</span>`;
-      else if (consecutive) badge = `<span class="conflict-tag conflict-tag--consecutive">подряд ✕</span>`;
-      else if (overloaded)  badge = `<span class="conflict-tag conflict-tag--overload">перегруз</span>`;
+      if (overloaded) badge = `<span class="conflict-tag conflict-tag--overload">перегруз</span>`;
 
-      const disabled = (consecutive && !alreadyHere) || alreadyHere;
+      // Выпадающий список кафедр если их несколько
+      const deptSelector = depts.length > 1
+        ? `<select class="dept-sel" data-tid="${t.id}" style="font-size:.7rem;border:1px solid var(--border);border-radius:4px;padding:2px 4px;margin-top:3px;max-width:100%;background:var(--surface)">
+            ${depts.map(d => `<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`).join('')}
+           </select>`
+        : `<span style="font-size:.72rem;color:var(--text-muted)">${depts[0]||''}</span>`;
 
       html += `<button class="teacher-option${selected ? ' selected' : ''}"
                        data-id="${t.id}"
-                       ${disabled ? 'disabled aria-disabled="true"' : ''}
                        role="option" aria-selected="${selected}">
-        <div class="opt-avatar" style="background:${color}">${initials(t.name)}</div>
+        <div class="opt-avatar" style="background:${color}" 
+             onclick="event.stopPropagation();openTeacherInfoModal('${t.id}')"
+             title="Инфо о преподавателе" role="button" tabindex="0">${initials(t.name)}</div>
         <div class="opt-info">
           <div class="opt-name">${t.name}</div>
-          <div class="opt-meta">${t.dept} · нед: ${wc}/${t.maxLoad}${t.phone ? ' · ' + t.phone : ''}</div>
+          <div class="opt-meta">нед: ${wc}/${t.maxLoad}${t.phone ? ' · ' + t.phone : ''}</div>
+          ${deptSelector}
         </div>
         ${badge}
       </button>`;
@@ -757,11 +752,11 @@ function openModal(key, day, month, year, mode = 'assign') {
   body.innerHTML = html;
 
   // Снять одного назначенного
-  body.querySelectorAll('.modal-remove-one').forEach(btn => {
+  body.querySelectorAll('.modal-remove-one[data-tid]').forEach(btn => {
     btn.addEventListener('click', () => {
-      removeDuty(key, btn.dataset.tid);
+      const dept = btn.dataset.dept || null;
+      removeDuty(key, btn.dataset.tid, dept || null);
       State.save();
-      // Перерисовываем модал
       openModal(key, day, month, year, 'assign');
       renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
     });
@@ -802,7 +797,10 @@ function openModal(key, day, month, year, mode = 'assign') {
 function saveModal() {
   const key = State.selectedCell;
   if (State.selectedTeacherId) {
-    addDuty(key, State.selectedTeacherId);
+    // Получаем выбранную кафедру из выпадающего списка (если есть)
+    const deptSel = document.querySelector(`.dept-sel[data-tid="${State.selectedTeacherId}"]`);
+    const chosenDept = deptSel ? deptSel.value : null;
+    addDuty(key, State.selectedTeacherId, chosenDept);
     showToast('Дежурство добавлено', 'success');
   }
   State.save();
@@ -810,12 +808,326 @@ function saveModal() {
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
 }
 
+// ─── DAY DETAIL PANEL ────────────────────────────────────────────────────────
+
+const PAIRS = [
+  { n: 1, time: '08:30 – 10:00' },
+  { n: 2, time: '10:20 – 11:50' },
+  { n: 3, time: '12:20 – 13:50' },
+  { n: 4, time: '14:10 – 15:40' },
+  { n: 5, time: '16:00 – 17:30' },
+  { n: 6, time: '17:50 – 19:20' },
+];
+
+/** Возвращает массив записей пары (создаёт если нет) */
+function getPairEntries(key, pairN) {
+  if (!State.lessons[key]) State.lessons[key] = {};
+  if (!State.lessons[key][pairN]) State.lessons[key][pairN] = [];
+  return State.lessons[key][pairN];
+}
+
+function openDayPanel(key) {
+  State.activeDayKey = key;
+  const panel = document.getElementById('dayPanel');
+  if (!panel) return;
+  renderDayPanel(key);
+  panel.classList.add('open');
+  document.getElementById('dayPanelBackdrop').classList.add('open');
+  document.body.classList.add('panel-open');
+  document.querySelectorAll('.day-cell').forEach(c => c.classList.remove('day-cell--active'));
+  const cell = document.querySelector(`.day-cell[data-key="${key}"]`);
+  if (cell) cell.classList.add('day-cell--active');
+}
+
+function closeDayPanel() {
+  State.activeDayKey = null;
+  const panel = document.getElementById('dayPanel');
+  if (panel) panel.classList.remove('open');
+  const bd = document.getElementById('dayPanelBackdrop');
+  if (bd) bd.classList.remove('open');
+  document.body.classList.remove('panel-open');
+  document.querySelectorAll('.day-cell').forEach(c => c.classList.remove('day-cell--active'));
+}
+
+function renderDayPanel(key) {
+  const panel = document.getElementById('dayPanel');
+  if (!panel) return;
+
+  const [y, mm, dd] = key.split('-').map(Number);
+  const dateObj = new Date(y, mm - 1, dd);
+  const dayName = DAYS_FULL[dateObj.getDay()];
+  const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
+  const isHoliday = !!getHolidayName(key);
+  const dutyEntries = getDutyEntries(key);
+  const isAdmin = State.currentRole === 'admin';
+
+  // Header
+  panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
+
+  // Дежурные на весь день (avatar strip)
+  const dutyStrip = panel.querySelector('.day-panel-duty-strip');
+  if (dutyEntries.length > 0) {
+    dutyStrip.innerHTML = `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
+      dutyEntries.map(e => {
+        const t = teacherById(e.tid);
+        if (!t) return '';
+        const color = getColor(teacherIndex(e.tid));
+        return `<div style="display:flex;align-items:center;gap:5px;background:${color}14;border:1px solid ${color}40;border-radius:20px;padding:3px 10px 3px 4px;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">
+          <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+          <span style="font-size:.75rem;font-weight:500;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</span>
+          ${isAdmin ? `<button onclick="event.stopPropagation();removeDutyFromPanel('${key}','${e.tid}','${e.dept||''}')" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:.8rem;padding:0 0 0 2px" title="Убрать">✕</button>` : ''}
+        </div>`;
+      }).join('') +
+      `</div>` +
+      (isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>` : '');
+  } else {
+    dutyStrip.innerHTML = isHoliday
+      ? `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`
+      : `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>
+         ${isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>` : ''}`;
+  }
+
+  // Pairs / Расписание пар
+  const pairsEl = panel.querySelector('.day-panel-pairs');
+  pairsEl.innerHTML = PAIRS.map(p => {
+    const entries = getPairEntries(key, p.n);
+    const entriesHtml = entries.length
+      ? entries.map((e, i) => {
+          const t = teacherById(e.tid);
+          if (!t) return '';
+          const color = getColor(teacherIndex(e.tid));
+          return `<div class="pair-teacher-row">
+            <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">${initials(t.name)}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</div>
+              <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">${e.dept || t.dept || ''}${e.room ? ' · 🚪 ' + e.room : ''}</div>
+            </div>
+            ${isAdmin ? `<button class="pair-remove-btn" onclick="removePairEntry('${key}',${p.n},${i})" title="Удалить">✕</button>` : ''}
+          </div>`;
+        }).join('')
+      : `<div style="font-size:.75rem;color:var(--text-faint);font-style:italic;padding:4px 0">— свободно —</div>`;
+
+    return `<details class="pair-block" ${entries.length ? 'open' : ''}>
+      <summary class="pair-summary">
+        <span class="pair-num">Пара ${p.n}</span>
+        <span class="pair-time">${p.time}</span>
+        <span class="pair-count">${entries.length > 0 ? entries.length + ' преп.' : ''}</span>
+        <span class="pair-chevron">▾</span>
+      </summary>
+      <div class="pair-body">
+        <div class="pair-teachers-list" id="pair-list-${key}-${p.n}">${entriesHtml}</div>
+        ${isAdmin ? `<div class="pair-add-row" id="pair-add-${key}-${p.n}">
+          <div class="select-wrap" style="flex:1;min-width:0">
+            <select class="field-input field-select pair-teacher-sel" style="height:32px;font-size:.78rem" id="pair-tsel-${key}-${p.n}">
+              <option value="">— Преподаватель —</option>
+              ${State.teachers.map(t => `<option value="${t.id}">${t.name.split(' ').slice(0,2).join(' ')}</option>`).join('')}
+            </select>
+          </div>
+          <input class="field-input" placeholder="Кабинет" style="width:72px;height:32px;font-size:.78rem" id="pair-room-${key}-${p.n}"/>
+          <button class="day-panel-add-btn" style="padding:0 10px;height:32px;font-size:.75rem" onclick="addPairEntry('${key}',${p.n})">+</button>
+        </div>` : ''}
+      </div>
+    </details>`;
+  }).join('');
+}
+
+function removeDutyFromPanel(key, tid, dept) {
+  removeDuty(key, tid, dept || null);
+  State.save();
+  renderDayPanel(key);
+  renderCalendar();
+  renderAccordion();
+  renderTeachersList();
+  renderStats();
+}
+
+function addPairEntry(key, pairN) {
+  const tSel = document.getElementById(`pair-tsel-${key}-${pairN}`);
+  const roomEl = document.getElementById(`pair-room-${key}-${pairN}`);
+  const tid = tSel?.value;
+  if (!tid) { showToast('Выберите преподавателя', 'error'); return; }
+  const t = teacherById(tid);
+  const depts = Array.isArray(t?.depts) && t.depts.length ? t.depts : [t?.dept].filter(Boolean);
+  const room = (roomEl?.value || '').trim();
+  const entries = getPairEntries(key, pairN);
+  entries.push({ tid, dept: depts[0] || '', room });
+  State.save();
+  renderDayPanel(key);
+  showToast('Преподаватель добавлен в пару', 'success');
+}
+
+function removePairEntry(key, pairN, idx) {
+  const entries = getPairEntries(key, pairN);
+  entries.splice(idx, 1);
+  State.save();
+  renderDayPanel(key);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function closeModal(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.remove('open');
   el.setAttribute('aria-hidden', 'true');
   if (id === 'modalOverlay') State.selectedCell = null;
+}
+
+// ─── GLOBAL DEPARTMENT REGISTRY ──────────────────────────────────────────────
+// Список кафедр — глобальный, редактируется пользователем, хранится в localStorage
+
+const DEFAULT_DEPTS = [
+  'Кафедра информатики и ВТ',
+  'Кафедра математики',
+  'Кафедра физики',
+  'Кафедра химии и биологии',
+  'Кафедра истории и обществознания',
+  'Кафедра русского языка и литературы',
+  'Кафедра иностранных языков',
+  'Кафедра физической культуры',
+  'Кафедра экономики и права',
+  'Кафедра психологии и педагогики',
+];
+
+function loadGlobalDepts() {
+  try {
+    const d = localStorage.getItem('ag_depts');
+    return d ? JSON.parse(d) : [...DEFAULT_DEPTS];
+  } catch { return [...DEFAULT_DEPTS]; }
+}
+function saveGlobalDepts(depts) {
+  try { localStorage.setItem('ag_depts', JSON.stringify(depts)); } catch {}
+}
+let globalDepts = loadGlobalDepts();
+
+/**
+ * Рендерит блок управления кафедрами внутри teacher modal.
+ * @param {string[]} selected — текущие кафедры редактируемого преподавателя
+ */
+function renderDeptManager(selected) {
+  const container = document.getElementById('tDeptsSection');
+  if (!container) return;
+
+  const selectedList = selected.length
+    ? selected.map((d, i) => `
+        <div class="dept-tag" style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <input class="field-input" style="flex:1;height:32px;font-size:.8rem" value="${d.replace(/"/g,'&quot;')}" data-dept-i="${i}"/>
+          <button type="button" class="modal-remove-one" data-dept-del="${i}" title="Удалить кафедру">✕</button>
+        </div>`).join('')
+    : '<div style="font-size:.78rem;color:var(--text-faint);padding:4px 0">Нет кафедр</div>';
+
+  container.innerHTML = `
+    <label class="field-label">Кафедры <span class="required">*</span></label>
+    <div id="tDeptsList">${selectedList}</div>
+    <div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">
+      <div class="select-wrap" style="flex:1;min-width:120px">
+        <select class="field-input field-select" id="tDeptPickSel" style="height:34px;font-size:.8rem">
+          <option value="">— выбрать из списка —</option>
+          ${globalDepts.map(d => `<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`).join('')}
+        </select>
+        <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <button type="button" class="btn btn--outline" id="tDeptAddFromList" style="padding:.3rem .7rem;font-size:.78rem;height:34px">+ Добавить</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:4px;align-items:center">
+      <input class="field-input" id="tDeptNewInput" placeholder="Новая кафедра…" style="flex:1;height:32px;font-size:.8rem"/>
+      <button type="button" class="btn btn--outline" id="tDeptAddNew" style="padding:.3rem .7rem;font-size:.78rem;height:34px;white-space:nowrap">+ Создать</button>
+    </div>`;
+
+  // Редактирование названия кафедры
+  container.querySelectorAll('[data-dept-i]').forEach(input => {
+    input.addEventListener('change', () => {
+      const i = parseInt(input.dataset.deptI);
+      _modalDepts[i] = input.value.trim();
+    });
+  });
+
+  // Удаление кафедры из списка преподавателя
+  container.querySelectorAll('[data-dept-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.dataset.deptDel);
+      _modalDepts.splice(i, 1);
+      renderDeptManager(_modalDepts);
+    });
+  });
+
+  // Добавить из глобального списка
+  document.getElementById('tDeptAddFromList').addEventListener('click', () => {
+    const val = document.getElementById('tDeptPickSel').value;
+    if (!val) return;
+    if (!_modalDepts.includes(val)) { _modalDepts.push(val); renderDeptManager(_modalDepts); }
+    else showToast('Уже добавлено', 'info');
+  });
+
+  // Создать новую кафедру и добавить глобально
+  document.getElementById('tDeptAddNew').addEventListener('click', () => {
+    const val = (document.getElementById('tDeptNewInput').value || '').trim();
+    if (!val) return;
+    if (!globalDepts.includes(val)) { globalDepts.push(val); saveGlobalDepts(globalDepts); }
+    if (!_modalDepts.includes(val)) { _modalDepts.push(val); renderDeptManager(_modalDepts); }
+    else showToast('Уже добавлено', 'info');
+  });
+}
+
+let _modalDepts = [];   // временное хранилище кафедр при редактировании
+
+// ─── TEACHER INFO POPUP ───────────────────────────────────────────────────────
+
+function openTeacherInfoModal(tid) {
+  const t = teacherById(tid);
+  if (!t) return;
+  const color = getColor(teacherIndex(tid));
+
+  const depts = Array.isArray(t.depts) && t.depts.length ? t.depts : [t.dept].filter(Boolean);
+  const deptsHtml = depts.map(d =>
+    `<span style="display:inline-block;background:${color}18;border:1px solid ${color}40;border-radius:12px;padding:3px 10px;font-size:.78rem;margin:2px">${d}</span>`
+  ).join('');
+
+  const y = State.currentDate.getFullYear();
+  const m = State.currentDate.getMonth();
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+  const dutyCount = Object.keys(State.duties).filter(k => k.startsWith(prefix) && getDutyIds(k).includes(tid)).length;
+
+  const blackouts = (State.blackoutDates[tid] || []).sort().map(k => {
+    const d = new Date(k + 'T00:00:00');
+    return `${d.getDate()} ${MONTHS_RU_GEN[d.getMonth()]}`;
+  });
+
+  document.getElementById('teacherInfoBody').innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:1.25rem">
+      <div style="width:56px;height:56px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+      <div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--navy)">${t.name}</div>
+        ${t.phone ? `<div style="font-size:.82rem;color:var(--text-muted);font-family:var(--font-mono);margin-top:3px">📞 ${t.phone}</div>` : ''}
+      </div>
+    </div>
+    <div style="margin-bottom:.75rem">
+      <div class="modal-section-label" style="margin-bottom:6px">Кафедры</div>
+      <div>${deptsHtml || '<span style="color:var(--text-faint);font-size:.82rem">—</span>'}</div>
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:.75rem">
+      <div style="flex:1;background:var(--surface-2);border-radius:var(--radius-sm);padding:10px;text-align:center">
+        <div style="font-size:1.5rem;font-weight:700;color:${color}">${dutyCount}</div>
+        <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">дежурств в месяце</div>
+      </div>
+      <div style="flex:1;background:var(--surface-2);border-radius:var(--radius-sm);padding:10px;text-align:center">
+        <div style="font-size:1.5rem;font-weight:700;color:${color}">${t.maxLoad}</div>
+        <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">макс. дн/нед</div>
+      </div>
+    </div>
+    ${blackouts.length ? `<div>
+      <div class="modal-section-label" style="margin-bottom:6px">🚫 Нежелательные даты</div>
+      <div style="font-size:.8rem;color:var(--text-secondary);font-family:var(--font-mono)">${blackouts.join(', ')}</div>
+    </div>` : ''}
+    <div class="modal-actions" style="margin-top:1.25rem">
+      <button class="btn-modal-clear" onclick="closeModal('teacherInfoOverlay')">Закрыть</button>
+      <button class="btn-modal-save" onclick="closeModal('teacherInfoOverlay');openTeacherModal('${tid}')">✏️ Редактировать</button>
+    </div>`;
+
+  const overlay = document.getElementById('teacherInfoOverlay');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
 }
 
 // ─── TEACHER MODAL (Add / Edit Popup) ────────────────────────────────────────
@@ -828,19 +1140,20 @@ function openTeacherModal(editId = null) {
   if (editId) {
     const t = teacherById(editId);
     title.textContent = 'Редактировать преподавателя';
-    document.getElementById('tName').value      = t.name || '';
-    document.getElementById('tDeptSel').value   = t.dept || '';
-    document.getElementById('tDeptCustom').value = '';
-    document.getElementById('tPhone').value     = t.phone || '';
-    document.getElementById('tLoad').value      = t.maxLoad || 2;
+    document.getElementById('tName').value  = t.name || '';
+    document.getElementById('tPhone').value = t.phone || '';
+    document.getElementById('tLoad').value  = t.maxLoad || 2;
+    _modalDepts = Array.isArray(t.depts) && t.depts.length ? [...t.depts] : [t.dept].filter(Boolean);
   } else {
     title.textContent = 'Добавить преподавателя';
-    ['tName','tDeptCustom','tPhone'].forEach(id => { document.getElementById(id).value = ''; });
-    document.getElementById('tDeptSel').value = '';
+    ['tName','tPhone'].forEach(id => { document.getElementById(id).value = ''; });
     document.getElementById('tLoad').value = 2;
+    _modalDepts = [];
   }
 
-  // ── Нежелательные даты в модале ──────────────────────────────────────────
+  renderDeptManager(_modalDepts);
+
+  // ── Нежелательные даты ──
   const tid = editId;
   const existingBlackouts = tid ? (State.blackoutDates[tid] || []) : [];
   _modalBlackouts = [...existingBlackouts];
@@ -904,32 +1217,38 @@ let _modalBlackouts = [];
 
 function saveTeacherModal() {
   const name    = (document.getElementById('tName').value || '').trim();
-  const dept    = (document.getElementById('tDeptCustom').value || '').trim()
-                   || document.getElementById('tDeptSel').value;
+  // Синхронизируем редактируемые поля перед сохранением
+  document.querySelectorAll('[data-dept-i]').forEach(input => {
+    const i = parseInt(input.dataset.deptI);
+    if (_modalDepts[i] !== undefined) _modalDepts[i] = input.value.trim();
+  });
+  const depts   = _modalDepts.filter(Boolean);
   const phone   = (document.getElementById('tPhone').value || '').trim();
-  const maxLoad = Math.max(1, Math.min(5, parseInt(document.getElementById('tLoad').value) || 2));
+  const maxLoad = Math.max(1, Math.min(6, parseInt(document.getElementById('tLoad').value) || 2));
   const editId  = document.getElementById('tEditId').value;
 
   if (!name) { showToast('Введите ФИО', 'error'); return; }
-  if (!dept) { showToast('Выберите кафедру', 'error'); return; }
+  if (!depts.length) { showToast('Добавьте хотя бы одну кафедру', 'error'); return; }
+
+  const dept = depts[0];
 
   if (editId) {
     const t = teacherById(editId);
     if (t) {
-      Object.assign(t, { name, dept, phone, maxLoad });
-      // Сохраняем нежелательные даты из модала
+      Object.assign(t, { name, dept, depts, phone, maxLoad });
       State.blackoutDates[editId] = [...(_modalBlackouts || [])];
       t.blackoutDates = State.blackoutDates[editId];
     }
     showToast('Данные обновлены', 'success');
   } else {
     const newId = 't_' + Date.now();
-    State.teachers.push({ id: newId, name, dept, phone, maxLoad, blackoutDates: [...(_modalBlackouts || [])] });
+    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, blackoutDates: [...(_modalBlackouts || [])] });
     State.blackoutDates[newId] = [...(_modalBlackouts || [])];
     showToast(`${name} добавлен(а)`, 'success');
   }
 
   _modalBlackouts = [];
+  _modalDepts = [];
   State.save();
   closeModal('teacherModalOverlay');
   renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet();
@@ -969,7 +1288,11 @@ function removeTeacher(id) {
   if (!t) return;
   if (!confirm(`Удалить ${t.name}?`)) return;
   State.teachers = State.teachers.filter(x => x.id !== id);
-  Object.keys(State.duties).forEach(k => { if (State.duties[k] === id) delete State.duties[k]; });
+  Object.keys(State.duties).forEach(k => {
+    const entries = getDutyEntries(k).filter(e => e.tid !== id);
+    if (entries.length) State.duties[k] = entries;
+    else delete State.duties[k];
+  });
   if (State.currentTeacherId === id) State.currentTeacherId = State.teachers[0]?.id || null;
   State.save();
   renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet();
@@ -1236,18 +1559,18 @@ function autoDistribute() {
     const prevKey  = shiftDay(key, -1);
     const prevIds  = getDutyIds(prevKey);
 
-    // Сколько назначить на этот день (1, если мало людей; иначе пропорционально)
+    // Сколько назначить на этот день
     const targetCount = Math.min(AUTO_MAX_PER_DAY, Math.max(1, Math.floor(State.teachers.length / workdays.length * total)));
     const slotCount   = Math.min(AUTO_MAX_PER_DAY, Math.max(1, targetCount));
 
-    const assignedToday = [];
+    const assignedTodayIds = [];
 
     for (let slot = 0; slot < slotCount; slot++) {
       const candidates = State.teachers.map(t => {
-        if (assignedToday.includes(t.id)) return null;  // уже назначен сегодня
+        if (assignedTodayIds.includes(t.id)) return null;  // уже назначен сегодня
         const wc         = weekCounts[t.id][weekId] || 0;
         const overloaded = wc >= t.maxLoad;
-        if (prevIds.includes(t.id)) return null;         // нельзя подряд
+        // Consecutive ban removed per user request
 
         const blackouts = [
           ...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []),
@@ -1263,13 +1586,12 @@ function autoDistribute() {
       if (candidates.length === 0) break;
 
       const winner = candidates[0].t;
-      assignedToday.push(winner.id);
+      const primaryDept = Array.isArray(winner.depts) && winner.depts.length ? winner.depts[0] : (winner.dept || null);
+      assignedTodayIds.push(winner.id);
       weekCounts[winner.id][weekId] = (weekCounts[winner.id][weekId] || 0) + 1;
       monthCounts[winner.id]++;
-    }
-
-    if (assignedToday.length > 0) {
-      State.duties[key] = assignedToday;
+      if (!State.duties[key]) State.duties[key] = [];
+      State.duties[key].push({ tid: winner.id, dept: primaryDept });
     }
   });
 
@@ -1350,8 +1672,12 @@ function init() {
     if (e.target === e.currentTarget) closeModal('modalOverlay');
   });
 
-  // Teacher modal
-  const tOverlay = document.getElementById('teacherModalOverlay');
+  // Teacher info popup
+  const tiOverlay = document.getElementById('teacherInfoOverlay');
+  if (tiOverlay) {
+    document.getElementById('teacherInfoClose').addEventListener('click', () => closeModal('teacherInfoOverlay'));
+    tiOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherInfoOverlay'); });
+  }
   if (tOverlay) {
     document.getElementById('teacherModalClose').addEventListener('click', () => closeModal('teacherModalOverlay'));
     tOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherModalOverlay'); });
@@ -1366,6 +1692,8 @@ function init() {
     if (e.key === 'Escape') {
       closeModal('modalOverlay');
       closeModal('teacherModalOverlay');
+      closeModal('teacherInfoOverlay');
+      closeDayPanel();
     }
   });
 
@@ -1444,6 +1772,18 @@ function init() {
   if (seedBtn) seedBtn.addEventListener('click', seedDemoData);
   // Глобальный доступ для вызова из консоли: seedDemoData()
   window.seedDemoData = seedDemoData;
+  window.openTeacherInfoModal = openTeacherInfoModal;
+  window.openDayPanel        = openDayPanel;
+  window.closeDayPanel       = closeDayPanel;
+  window.removeDutyFromPanel = removeDutyFromPanel;
+  window.addPairEntry        = addPairEntry;
+  window.removePairEntry     = removePairEntry;
+
+  // Day panel
+  const dpClose = document.getElementById('dayPanelClose');
+  if (dpClose) dpClose.addEventListener('click', closeDayPanel);
+  const dpBackdrop = document.getElementById('dayPanelBackdrop');
+  if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
 
   // Initial render
   applyRole('admin');
@@ -1497,26 +1837,31 @@ document.addEventListener('DOMContentLoaded', init);
 // Таблицы (создайте в Supabase → SQL Editor):
 //
 //   CREATE TABLE teachers (
-//     id            TEXT PRIMARY KEY,
-//     name          TEXT NOT NULL,
-//     dept          TEXT NOT NULL,
-//     phone         TEXT DEFAULT '',
-//     max_load      INT  DEFAULT 2,
+//     id             TEXT PRIMARY KEY,
+//     name           TEXT NOT NULL,
+//     dept           TEXT NOT NULL DEFAULT '',   -- основная кафедра
+//     depts          JSONB DEFAULT '[]',          -- ★ все кафедры преподавателя
+//     phone          TEXT DEFAULT '',
+//     max_load       INT  DEFAULT 2,
 //     blackout_dates JSONB DEFAULT '[]'
 //   );
+//   -- Миграция если таблица уже есть:
+//   -- ALTER TABLE teachers ADD COLUMN IF NOT EXISTS depts JSONB DEFAULT '[]';
 //
-//   -- ★ ВАЖНО: составной PRIMARY KEY (date_key, teacher_id)
-//   --   позволяет назначать нескольких преподавателей на один день.
+//   -- ★ ВАЖНО: составной PRIMARY KEY (date_key, teacher_id, dept)
+//   --   позволяет одному преподавателю быть в один день с разными кафедрами.
 //   CREATE TABLE schedule (
 //     date_key        TEXT NOT NULL,        -- "YYYY-MM-DD"
 //     teacher_id      TEXT NOT NULL,
+//     dept            TEXT DEFAULT NULL,    -- ★ какая кафедра в этот день
 //     replace_request BOOLEAN DEFAULT false,
-//     PRIMARY KEY (date_key, teacher_id)
+//     PRIMARY KEY (date_key, teacher_id, dept)
 //   );
 //
-//   -- Если таблица уже существует со старым PK, выполните миграцию:
+//   -- Если таблица уже существует, выполните миграцию:
+//   -- ALTER TABLE schedule ADD COLUMN IF NOT EXISTS dept TEXT DEFAULT NULL;
 //   -- ALTER TABLE schedule DROP CONSTRAINT schedule_pkey;
-//   -- ALTER TABLE schedule ADD PRIMARY KEY (date_key, teacher_id);
+//   -- ALTER TABLE schedule ADD PRIMARY KEY (date_key, teacher_id, dept);
 //
 // Realtime: Dashboard → Database → Replication → включить для обеих таблиц.
 // RLS: для демо оставьте отключённым, или добавьте политику "Allow all".
@@ -1600,7 +1945,7 @@ async function loadSchedule() {
   if (!sb) return;
   const { data, error } = await sb
     .from('schedule')
-    .select('date_key, teacher_id, replace_request');
+    .select('date_key, teacher_id, dept, replace_request');
 
   if (error) {
     console.warn('[SB] loadSchedule error:', error.message);
@@ -1611,11 +1956,10 @@ async function loadSchedule() {
   State.replaceRequests = {};
   (data || []).forEach(r => {
     if (r.teacher_id) {
-      // Накапливаем массив: одна строка БД = один преподаватель в один день
       if (!State.duties[r.date_key]) State.duties[r.date_key] = [];
-      if (!State.duties[r.date_key].includes(r.teacher_id)) {
-        State.duties[r.date_key].push(r.teacher_id);
-      }
+      const entry = { tid: r.teacher_id, dept: r.dept || null };
+      const already = State.duties[r.date_key].some(e => e.tid === entry.tid && e.dept === entry.dept);
+      if (!already) State.duties[r.date_key].push(entry);
     }
     if (r.replace_request) State.replaceRequests[r.date_key] = true;
   });
@@ -1630,10 +1974,18 @@ async function loadSchedule() {
 // ─── МАППИНГ СТРОКИ БД → ОБЪЕКТ УЧИТЕЛЯ ─────────────────────────────────────
 
 function mapTeacherRow(r) {
+  // Поддержка нового поля depts (массив) и старого dept (строка)
+  let depts = [];
+  if (Array.isArray(r.depts) && r.depts.length) {
+    depts = r.depts;
+  } else if (r.dept) {
+    depts = [r.dept];
+  }
   return {
     id:            r.id,
     name:          r.name,
-    dept:          r.dept,
+    dept:          depts[0] || '',           // главная кафедра (обратная совместимость)
+    depts:         depts,                    // все кафедры
     phone:         r.phone || '',
     maxLoad:       r.max_load || 2,
     blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [],
@@ -1643,14 +1995,15 @@ function mapTeacherRow(r) {
 // ─── ЗАПИСЬ В SUPABASE ───────────────────────────────────────────────────────
 
 async function saveTeachers(teacher) {
-  // teacher — один объект или null (если нужно перезаписать всю таблицу — не нужно)
   if (!sb || !teacher) return;
+  const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean);
   const { error } = await sb
     .from('teachers')
     .upsert({
       id:             teacher.id,
       name:           teacher.name,
-      dept:           teacher.dept,
+      dept:           depts[0] || '',
+      depts:          depts,
       phone:          teacher.phone || '',
       max_load:       teacher.maxLoad || 2,
       blackout_dates: State.blackoutDates[teacher.id] || [],
@@ -1670,22 +2023,21 @@ async function deleteTeacherFromSb(id) {
  * Сохраняет/удаляет одну запись (дата + преподаватель) в таблице schedule.
  * Таблица должна иметь PRIMARY KEY (date_key, teacher_id).
  */
-async function saveSchedule(key, teacherId, replaceRequest = false) {
+async function saveSchedule(key, teacherId, replaceRequest = false, dept = null) {
   if (!sb) return;
   if (teacherId) {
     const { error } = await sb
       .from('schedule')
-      .upsert({ date_key: key, teacher_id: teacherId, replace_request: replaceRequest },
-               { onConflict: 'date_key,teacher_id' });
+      .upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest },
+               { onConflict: 'date_key,teacher_id,dept' });
     if (error) console.warn('[SB] saveSchedule upsert error:', error.message);
   } else {
-    // teacherId = null → удаляем весь день
     const { error } = await sb.from('schedule').delete().eq('date_key', key);
     if (error) console.warn('[SB] saveSchedule delete error:', error.message);
   }
 }
 
-/** Удаляет одну конкретную пару (дата, преподаватель) из БД */
+/** Удаляет одну конкретную запись (дата, преподаватель) из БД */
 async function saveScheduleRemoveOne(key, teacherId) {
   if (!sb) return;
   const { error } = await sb.from('schedule').delete()
@@ -1694,12 +2046,11 @@ async function saveScheduleRemoveOne(key, teacherId) {
 }
 
 async function saveScheduleBatch(rows) {
-  // rows = [{ date_key, teacher_id, replace_request }]
-  // Таблица: PRIMARY KEY (date_key, teacher_id)
+  // rows = [{ date_key, teacher_id, dept, replace_request }]
   if (!sb || !rows.length) return;
   const { error } = await sb
     .from('schedule')
-    .upsert(rows, { onConflict: 'date_key,teacher_id' });
+    .upsert(rows, { onConflict: 'date_key,teacher_id,dept' });
   if (error) console.warn('[SB] saveScheduleBatch error:', error.message);
 }
 
@@ -1825,8 +2176,12 @@ const _saveModal = saveModal;
 window.saveModal = async function () {
   const key = State.selectedCell;
   const tid = State.selectedTeacherId;
-  _saveModal();   // локально addDuty уже выполнен
-  if (tid) await saveSchedule(key, tid, false);
+  const deptSel = tid ? document.querySelector(`.dept-sel[data-tid="${tid}"]`) : null;
+  const chosenDept = deptSel ? deptSel.value : null;
+  _saveModal();
+  if (tid) await saveSchedule(key, tid, false, chosenDept);
+  // Обновляем боковую панель если открыта для этого же дня
+  if (State.activeDayKey === key) renderDayPanel(key);
 };
 
 // ── Быстрое снятие всего дня ──
@@ -1855,13 +2210,15 @@ window.autoDistribute = async function () {
   const m = State.currentDate.getMonth();
   await deleteScheduleMonth(y, m);
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
-  // Разворачиваем массивы: одна строка БД на каждую пару (дата, преподаватель)
   const rows = [];
   Object.entries(State.duties)
     .filter(([k]) => k.startsWith(prefix))
     .forEach(([k, v]) => {
-      const ids = Array.isArray(v) ? v : [v];
-      ids.forEach(tid => rows.push({ date_key: k, teacher_id: tid, replace_request: false }));
+      const entries = Array.isArray(v) ? v : [v];
+      entries.forEach(e => {
+        const { tid, dept } = normEntry(e);
+        rows.push({ date_key: k, teacher_id: tid, dept: dept || null, replace_request: false });
+      });
     });
   await saveScheduleBatch(rows);
 };
