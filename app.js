@@ -1849,25 +1849,19 @@ document.addEventListener('DOMContentLoaded', init);
 //   -- ALTER TABLE teachers ADD COLUMN IF NOT EXISTS depts JSONB DEFAULT '[]';
 //
 //   -- ★ ВАЖНО: составной PRIMARY KEY (date_key, teacher_id, dept)
-//   --   dept НЕ NULL — PostgreSQL NULL≠NULL иначе ломает upsert.
+//   --   позволяет одному преподавателю быть в один день с разными кафедрами.
 //   CREATE TABLE schedule (
-//     date_key        TEXT NOT NULL,             -- "YYYY-MM-DD"
+//     date_key        TEXT NOT NULL,        -- "YYYY-MM-DD"
 //     teacher_id      TEXT NOT NULL,
-//     dept            TEXT NOT NULL DEFAULT '',  -- '' если кафедра не указана
+//     dept            TEXT DEFAULT NULL,    -- ★ какая кафедра в этот день
 //     replace_request BOOLEAN DEFAULT false,
 //     PRIMARY KEY (date_key, teacher_id, dept)
 //   );
 //
-//   -- ★ Миграция существующей таблицы (выполнять СТРОГО по шагам):
-//   -- ШАГ 1: добавить колонку с DEFAULT (NULL строки получат '' автоматически)
-//   ALTER TABLE schedule ADD COLUMN IF NOT EXISTS dept TEXT DEFAULT '';
-//   -- ШАГ 2: обнулить все NULL значения (страховка)
-//   UPDATE schedule SET dept = '' WHERE dept IS NULL;
-//   -- ШАГ 3: поставить NOT NULL
-//   ALTER TABLE schedule ALTER COLUMN dept SET NOT NULL;
-//   -- ШАГ 4: пересоздать первичный ключ
-//   ALTER TABLE schedule DROP CONSTRAINT schedule_pkey;
-//   ALTER TABLE schedule ADD PRIMARY KEY (date_key, teacher_id, dept);
+//   -- Если таблица уже существует, выполните миграцию:
+//   -- ALTER TABLE schedule ADD COLUMN IF NOT EXISTS dept TEXT DEFAULT NULL;
+//   -- ALTER TABLE schedule DROP CONSTRAINT schedule_pkey;
+//   -- ALTER TABLE schedule ADD PRIMARY KEY (date_key, teacher_id, dept);
 //
 // Realtime: Dashboard → Database → Replication → включить для обеих таблиц.
 // RLS: для демо оставьте отключённым, или добавьте политику "Allow all".
@@ -1893,19 +1887,32 @@ function setSbStatus(state, msg) {
 // ─── ИНИЦИАЛИЗАЦИЯ ────────────────────────────────────────────────────────────
 
 async function initSupabase() {
-  // SDK загружается через CDN как window.supabase
-  const sdk = window.supabase || window.Supabase;
+  // Ждём пока CDN загрузит SDK (максимум 5 секунд)
+  let sdk = null;
+  for (let i = 0; i < 50; i++) {
+    sdk = window.supabase ?? window.Supabase ?? window.supabaseJs;
+    if (sdk && typeof sdk.createClient === 'function') break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+
   if (!sdk || typeof sdk.createClient !== 'function') {
-    console.warn('[SB] SDK не найден — работаем в режиме localStorage');
-    setSbStatus('error', 'SDK не загружен');
+    console.error('[SB] SDK не загружен после 5 секунд ожидания');
+    setSbStatus('error', 'SDK не загружен — проверьте сеть');
     return;
   }
 
   setSbStatus('connecting', 'подключение…');
   try {
     sb = sdk.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
       realtime: { params: { eventsPerSecond: 10 } },
     });
+
+    // Тестовый запрос для проверки соединения и правильности ключа
+    const { data, error: pingErr } = await sb.from('teachers').select('id').limit(1);
+    if (pingErr) {
+      throw new Error(`Ошибка доступа к таблице "teachers": ${pingErr.message} (code: ${pingErr.code})`);
+    }
 
     await loadTeachers();
     await loadSchedule();
@@ -1916,6 +1923,7 @@ async function initSupabase() {
   } catch (err) {
     console.error('[SB] Ошибка инициализации:', err);
     setSbStatus('error', `ошибка: ${err.message}`);
+    sb = null;
   }
 }
 
@@ -2027,19 +2035,15 @@ async function deleteTeacherFromSb(id) {
 
 /**
  * Сохраняет/удаляет одну запись (дата + преподаватель) в таблице schedule.
- * Таблица должна иметь PRIMARY KEY (date_key, teacher_id, dept).
- * dept НИКОГДА не NULL — используем '' как значение по умолчанию.
+ * Таблица должна иметь PRIMARY KEY (date_key, teacher_id).
  */
 async function saveSchedule(key, teacherId, replaceRequest = false, dept = null) {
   if (!sb) return;
-  const deptVal = dept || '';   // NULL → '' (колонка NOT NULL DEFAULT '')
   if (teacherId) {
     const { error } = await sb
       .from('schedule')
-      .upsert(
-        { date_key: key, teacher_id: teacherId, dept: deptVal, replace_request: replaceRequest },
-        { onConflict: 'date_key,teacher_id,dept' }
-      );
+      .upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest },
+               { onConflict: 'date_key,teacher_id,dept' });
     if (error) console.warn('[SB] saveSchedule upsert error:', error.message);
   } else {
     const { error } = await sb.from('schedule').delete().eq('date_key', key);
@@ -2047,7 +2051,7 @@ async function saveSchedule(key, teacherId, replaceRequest = false, dept = null)
   }
 }
 
-/** Удаляет одну конкретную запись (дата, преподаватель, кафедра) из БД */
+/** Удаляет одну конкретную запись (дата, преподаватель) из БД */
 async function saveScheduleRemoveOne(key, teacherId) {
   if (!sb) return;
   const { error } = await sb.from('schedule').delete()
@@ -2056,12 +2060,11 @@ async function saveScheduleRemoveOne(key, teacherId) {
 }
 
 async function saveScheduleBatch(rows) {
+  // rows = [{ date_key, teacher_id, dept, replace_request }]
   if (!sb || !rows.length) return;
-  // Нормализуем dept: NULL/undefined → '' чтобы NOT NULL не падал
-  const normalized = rows.map(r => ({ ...r, dept: r.dept || '' }));
   const { error } = await sb
     .from('schedule')
-    .upsert(normalized, { onConflict: 'date_key,teacher_id,dept' });
+    .upsert(rows, { onConflict: 'date_key,teacher_id,dept' });
   if (error) console.warn('[SB] saveScheduleBatch error:', error.message);
 }
 
@@ -2188,9 +2191,10 @@ window.saveModal = async function () {
   const key = State.selectedCell;
   const tid = State.selectedTeacherId;
   const deptSel = tid ? document.querySelector(`.dept-sel[data-tid="${tid}"]`) : null;
-  const chosenDept = deptSel ? (deptSel.value || '') : '';  // '' вместо null — NOT NULL в БД
+  const chosenDept = deptSel ? deptSel.value : null;
   _saveModal();
   if (tid) await saveSchedule(key, tid, false, chosenDept);
+  // Обновляем боковую панель если открыта для этого же дня
   if (State.activeDayKey === key) renderDayPanel(key);
 };
 
@@ -2227,7 +2231,7 @@ window.autoDistribute = async function () {
       const entries = Array.isArray(v) ? v : [v];
       entries.forEach(e => {
         const { tid, dept } = normEntry(e);
-        rows.push({ date_key: k, teacher_id: tid, dept: dept || '', replace_request: false });
+        rows.push({ date_key: k, teacher_id: tid, dept: dept || null, replace_request: false });
       });
     });
   await saveScheduleBatch(rows);
