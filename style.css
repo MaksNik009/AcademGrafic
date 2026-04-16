@@ -1188,21 +1188,22 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   flex-wrap: wrap;
   gap: 3px;
   margin-top: 4px;
-  max-height: 72px;          /* limit height */
+  max-height: 72px;
   overflow: hidden;
   position: relative;
 }
-/* Fade-out when avatars overflow */
+/* Более прозрачное затухание */
 .cell-avatar-grid::after {
   content: '';
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  height: 20px;
-  background: linear-gradient(transparent, var(--surface));
+  height: 16px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0.55));
   pointer-events: none;
 }
-.day-cell--today .cell-avatar-grid::after  { background: linear-gradient(transparent, #2C3E50); }
-.day-cell--past  .cell-avatar-grid::after  { background: linear-gradient(transparent, var(--surface)); }
+.day-cell--today .cell-avatar-grid::after { background: linear-gradient(to bottom, rgba(44,62,80,0), rgba(44,62,80,0.5)); }
+.day-cell--past  .cell-avatar-grid::after { background: linear-gradient(to bottom, rgba(248,249,250,0), rgba(248,249,250,0.55)); }
+.day-cell--sunday .cell-avatar-grid::after { background: linear-gradient(to bottom, rgba(223,237,245,0), rgba(223,237,245,0.55)); }
 
 .cell-avatar {
   width: 26px; height: 26px;
@@ -1237,17 +1238,17 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 
 .day-panel {
   position: fixed;
-  top: 0; right: -420px;
+  top: 0; left: -420px;           /* ← LEFT side */
   width: 400px; max-width: 95vw;
   height: 100dvh;
   background: var(--surface);
-  box-shadow: -6px 0 32px rgba(44,62,80,.18);
+  box-shadow: 6px 0 32px rgba(44,62,80,.18);   /* shadow to the RIGHT */
   z-index: 201;
   display: flex; flex-direction: column;
-  transition: right .28s cubic-bezier(.4,0,.2,1);
-  border-left: 1px solid var(--border);
+  transition: left .28s cubic-bezier(.4,0,.2,1);
+  border-right: 1px solid var(--border);        /* border on RIGHT edge */
 }
-.day-panel.open { right: 0; }
+.day-panel.open { left: 0; }                    /* slide IN from left */
 
 .day-panel-header {
   display: flex; align-items: center;
@@ -1367,15 +1368,14 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   flex-wrap: nowrap;
 }
 
-/* Shift calendar wrapper when panel is open on wide screens */
+/* Shift calendar wrapper when panel is open — panel is on LEFT */
 @media (min-width: 900px) {
-  .day-panel.open ~ * { /* can't target parent — use body class instead */ }
-  body.panel-open .calendar-card { margin-right: 410px; transition: margin-right .28s; }
+  body.panel-open .calendar-card { margin-left: 410px; transition: margin-left .28s; }
 }
 
-/* Mobile panel */
+/* Mobile panel — full width from left */
 @media (max-width: 768px) {
-  .day-panel { width: 100vw; max-width: 100vw; right: -100vw; }
-  .day-panel.open { right: 0; }
-  body.panel-open .calendar-card { margin-right: 0; }
+  .day-panel { width: 100vw; max-width: 100vw; left: -100vw; }
+  .day-panel.open { left: 0; }
+  body.panel-open .calendar-card { margin-left: 0; }
 }

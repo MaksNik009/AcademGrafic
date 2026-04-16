@@ -1678,6 +1678,9 @@ function init() {
     document.getElementById('teacherInfoClose').addEventListener('click', () => closeModal('teacherInfoOverlay'));
     tiOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherInfoOverlay'); });
   }
+
+  // Teacher modal — FIX: объявляем tOverlay перед использованием
+  const tOverlay = document.getElementById('teacherModalOverlay');
   if (tOverlay) {
     document.getElementById('teacherModalClose').addEventListener('click', () => closeModal('teacherModalOverlay'));
     tOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherModalOverlay'); });
