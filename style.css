@@ -1188,22 +1188,21 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   flex-wrap: wrap;
   gap: 3px;
   margin-top: 4px;
-  max-height: 72px;
+  max-height: 72px;          /* limit height */
   overflow: hidden;
   position: relative;
 }
-/* Более прозрачное затухание */
+/* Fade-out when avatars overflow */
 .cell-avatar-grid::after {
   content: '';
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  height: 16px;
-  background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0.55));
+  height: 20px;
+  background: linear-gradient(transparent, var(--surface));
   pointer-events: none;
 }
-.day-cell--today .cell-avatar-grid::after { background: linear-gradient(to bottom, rgba(44,62,80,0), rgba(44,62,80,0.5)); }
-.day-cell--past  .cell-avatar-grid::after { background: linear-gradient(to bottom, rgba(248,249,250,0), rgba(248,249,250,0.55)); }
-.day-cell--sunday .cell-avatar-grid::after { background: linear-gradient(to bottom, rgba(223,237,245,0), rgba(223,237,245,0.55)); }
+.day-cell--today .cell-avatar-grid::after  { background: linear-gradient(transparent, #2C3E50); }
+.day-cell--past  .cell-avatar-grid::after  { background: linear-gradient(transparent, var(--surface)); }
 
 .cell-avatar {
   width: 26px; height: 26px;
@@ -1238,17 +1237,17 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 
 .day-panel {
   position: fixed;
-  top: 0; left: -420px;           /* ← LEFT side */
+  top: 0; right: -420px;
   width: 400px; max-width: 95vw;
   height: 100dvh;
   background: var(--surface);
-  box-shadow: 6px 0 32px rgba(44,62,80,.18);   /* shadow to the RIGHT */
+  box-shadow: -6px 0 32px rgba(44,62,80,.18);
   z-index: 201;
   display: flex; flex-direction: column;
-  transition: left .28s cubic-bezier(.4,0,.2,1);
-  border-right: 1px solid var(--border);        /* border on RIGHT edge */
+  transition: right .28s cubic-bezier(.4,0,.2,1);
+  border-left: 1px solid var(--border);
 }
-.day-panel.open { left: 0; }                    /* slide IN from left */
+.day-panel.open { right: 0; }
 
 .day-panel-header {
   display: flex; align-items: center;
@@ -1368,14 +1367,165 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   flex-wrap: nowrap;
 }
 
-/* Shift calendar wrapper when panel is open — panel is on LEFT */
+/* Shift calendar wrapper when panel is open on wide screens */
 @media (min-width: 900px) {
-  body.panel-open .calendar-card { margin-left: 410px; transition: margin-left .28s; }
+  .day-panel.open ~ * { /* can't target parent — use body class instead */ }
+  body.panel-open .calendar-card { margin-right: 410px; transition: margin-right .28s; }
 }
 
-/* Mobile panel — full width from left */
+/* Mobile panel */
 @media (max-width: 768px) {
-  .day-panel { width: 100vw; max-width: 100vw; left: -100vw; }
-  .day-panel.open { left: 0; }
-  body.panel-open .calendar-card { margin-left: 0; }
+  .day-panel { width: 100vw; max-width: 100vw; right: -100vw; }
+  .day-panel.open { right: 0; }
+  body.panel-open .calendar-card { margin-right: 0; }
+}
+
+/* ══════════════════════════════════════════════════
+   ★ TEACHER MODE — hide admin tabs, show calendar only
+   ══════════════════════════════════════════════════ */
+body[data-role="teacher"] .admin-only      { display: none !important; }
+body[data-role="teacher"] .teacher-only    { display: flex !important; }
+/* Hide all tabs except calendar for teacher */
+body[data-role="teacher"] .nav-btn[data-tab="teachers"],
+body[data-role="teacher"] .nav-btn[data-tab="stats"],
+body[data-role="teacher"] .nav-btn[data-tab="cabinet"],
+body[data-role="teacher"] .mob-nav-btn[data-tab="teachers"],
+body[data-role="teacher"] .mob-nav-btn[data-tab="stats"],
+body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !important; }
+
+/* ══════════════════════════════════════════════════
+   ★ WELCOME SCREEN
+   ══════════════════════════════════════════════════ */
+.welcome-overlay {
+  background: rgba(20, 30, 48, 0.92) !important;
+  backdrop-filter: blur(8px);
+  z-index: 500 !important;
+}
+.welcome-overlay.open { display: flex !important; }
+
+.welcome-card {
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 2.5rem 2rem 2rem;
+  max-width: 440px; width: 90%;
+  box-shadow: 0 24px 80px rgba(0,0,0,.35);
+  text-align: center;
+  animation: slideUp .3s ease;
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.welcome-logo {
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; margin-bottom: 1.5rem;
+}
+.welcome-brand {
+  font-family: var(--font-display); font-size: 1.4rem;
+  font-weight: 800; color: var(--navy);
+}
+.welcome-sub {
+  font-size: .72rem; color: var(--text-muted);
+  font-family: var(--font-mono); text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.welcome-title {
+  font-family: var(--font-display); font-size: 1.6rem;
+  font-weight: 700; color: var(--navy); margin-bottom: .4rem;
+}
+.welcome-hint {
+  font-size: .88rem; color: var(--text-muted); margin-bottom: 1.75rem;
+}
+
+.welcome-choices {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+}
+.welcome-choice {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 1.4rem 1rem;
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: 16px; cursor: pointer;
+  transition: border-color .18s, background .18s, transform .15s, box-shadow .18s;
+}
+.welcome-choice:hover {
+  border-color: var(--blue);
+  background: var(--blue-light);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(74,144,217,.18);
+}
+.welcome-choice-icon { font-size: 2.2rem; }
+.welcome-choice-label {
+  font-size: 1rem; font-weight: 700; color: var(--navy);
+}
+.welcome-choice-sub {
+  font-size: .7rem; color: var(--text-muted); font-family: var(--font-mono);
+}
+
+/* ══════════════════════════════════════════════════
+   ★ CALENDAR — no shift when panel opens, backdrop dims instead
+   ══════════════════════════════════════════════════ */
+/* Remove any calendar shift */
+body.panel-open .calendar-card { margin-left: 0 !important; margin-right: 0 !important; }
+
+/* Backdrop dims the rest of the screen */
+.day-panel-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.32);
+  z-index: 200;
+  backdrop-filter: blur(1.5px);
+}
+.day-panel-backdrop.open { display: block; }
+
+/* ══════════════════════════════════════════════════
+   ★ LARGER CALENDAR CELLS
+   ══════════════════════════════════════════════════ */
+.day-cell {
+  min-height: 110px !important;
+}
+
+/* ══════════════════════════════════════════════════
+   ★ AVATAR FADE — only when overflow, at very bottom, semi-transparent
+   ══════════════════════════════════════════════════ */
+.cell-avatar-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+  max-height: 76px;
+  overflow: hidden;
+  position: relative;
+}
+/* Fade only appears when content overflows */
+.cell-avatar-grid::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 14px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.6) 100%);
+  pointer-events: none;
+  /* Only visible if content is actually overflowing — JS adds .has-overflow */
+  opacity: 0;
+  transition: opacity .15s;
+}
+.cell-avatar-grid.has-overflow::after { opacity: 1; }
+.day-cell--today .cell-avatar-grid::after {
+  background: linear-gradient(to bottom, rgba(44,62,80,0) 0%, rgba(44,62,80,0.35) 100%);
+}
+.day-cell--sunday .cell-avatar-grid::after {
+  background: linear-gradient(to bottom, rgba(223,237,245,0) 0%, rgba(223,237,245,0.6) 100%);
+}
+
+/* ══════════════════════════════════════════════════
+   ★ PAIR ADD ROW — кабинет не вылезает
+   ══════════════════════════════════════════════════ */
+.pair-add-row {
+  display: flex; gap: 6px; align-items: center;
+  flex-wrap: wrap;
+}
+.pair-add-row .field-input[placeholder="Кабинет"] {
+  width: 72px; min-width: 60px; flex-shrink: 0;
+  box-sizing: border-box;
 }

@@ -63,17 +63,18 @@ function isHoliday(dateOrKey) {
 const State = {
   teachers: [],
   duties: {},
-  replaceRequests: {},    // { "YYYY-MM-DD": true }
-  blackoutDates: {},      // { teacherId: ["YYYY-MM-DD", …] }
-  notifications: [],      // [{ id, msg, icon, time }]
-  lessons: {},            // { "YYYY-MM-DD": { "1":[{tid,dept,room}], ..., "6":[...] } }
-  currentRole: 'admin',   // 'admin' | 'teacher'
+  replaceRequests: {},
+  blackoutDates: {},
+  notifications: [],
+  lessons: {},
+  currentRole: 'admin',
   currentTeacherId: null,
   currentDate: new Date(),
   selectedCell: null,
   selectedTeacherId: null,
   modalMode: 'assign',
-  activeDayKey: null,     // открытая боковая панель
+  activeDayKey: null,
+  welcomed: false,        // ← показан ли экран выбора роли
 
   avatarColors: [
     '#2C6FAC','#1A7A4A','#8E44AD','#C0392B',
@@ -260,12 +261,9 @@ function applyRole(role) {
     if (!State.currentTeacherId && State.teachers.length > 0) {
       State.currentTeacherId = State.teachers[0].id;
     }
-    // If currently on admin-only tab, switch to calendar
-    const activeTab = document.querySelector('.tab-panel.active');
-    if (activeTab && activeTab.id === 'tab-teachers') {
-      switchTab('calendar');
-    }
-    renderMyCabinet();
+    // Принудительно переключаем на calendar и закрываем панель
+    closeDayPanel();
+    switchTab('calendar');
   }
 
   renderCalendar();
@@ -441,6 +439,12 @@ function renderCalendar() {
         avatarGrid.appendChild(av);
       });
       cell.appendChild(avatarGrid);
+      // Detect overflow after paint to show fade
+      requestAnimationFrame(() => {
+        if (avatarGrid.scrollHeight > avatarGrid.clientHeight + 2) {
+          avatarGrid.classList.add('has-overflow');
+        }
+      });
     } else if (!isHoliday && State.currentRole === 'admin') {
       const hint = document.createElement('div');
       hint.className = 'add-hint';
@@ -808,7 +812,146 @@ function saveModal() {
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
 }
 
+// ─── AUTH / WELCOME SYSTEM ────────────────────────────────────────────────────
+
+const ADMIN_LOGIN    = '123';
+const ADMIN_PASSWORD = '123';
+
+/** Показывает приветственный экран при первом входе */
+function showWelcomeScreen() {
+  const overlay = document.getElementById('welcomeOverlay');
+  if (overlay) overlay.classList.add('open');
+}
+
+function hideWelcomeScreen() {
+  const overlay = document.getElementById('welcomeOverlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+/** Открывает модал входа для Завуча */
+function showAdminLoginModal(onSuccess) {
+  const overlay = document.getElementById('authModalOverlay');
+  const body    = document.getElementById('authModalBody');
+  if (!overlay || !body) return;
+
+  body.innerHTML = `
+    <div style="text-align:center;margin-bottom:1.5rem">
+      <div style="font-size:2.5rem;margin-bottom:.5rem">🔐</div>
+      <h2 style="font-family:var(--font-display);color:var(--navy);font-size:1.3rem">Вход для Завуча</h2>
+      <p style="font-size:.82rem;color:var(--text-muted);margin-top:.25rem">Введите логин и пароль</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.75rem">
+      <input class="field-input" type="text" id="authLogin" placeholder="Логин" autocomplete="username" style="font-size:1rem"/>
+      <input class="field-input" type="password" id="authPassword" placeholder="Пароль" autocomplete="current-password" style="font-size:1rem"/>
+      <div style="display:flex;align-items:center;gap:.75rem;margin-top:.25rem">
+        <button class="btn-modal-save" id="authSubmitBtn" style="flex:1;padding:.7rem">Войти</button>
+        <span id="authStatus" style="font-size:1.4rem;width:28px;text-align:center;flex-shrink:0"></span>
+      </div>
+      <button class="btn-modal-clear" id="authCancelBtn" style="margin-top:.25rem">Отмена</button>
+    </div>`;
+
+  const doLogin = () => {
+    const login = (document.getElementById('authLogin')?.value || '').trim();
+    const pass  = (document.getElementById('authPassword')?.value || '').trim();
+    const status = document.getElementById('authStatus');
+    if (login === ADMIN_LOGIN && pass === ADMIN_PASSWORD) {
+      status.textContent = '✅';
+      setTimeout(() => {
+        hideAuthModal();
+        onSuccess && onSuccess();
+      }, 400);
+    } else {
+      status.textContent = '❌';
+      document.getElementById('authPassword').value = '';
+      setTimeout(() => { if (status) status.textContent = ''; }, 1500);
+    }
+  };
+
+  body.querySelector('#authSubmitBtn').addEventListener('click', doLogin);
+  body.querySelector('#authCancelBtn').addEventListener('click', hideAuthModal);
+  body.querySelector('#authPassword').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+  setTimeout(() => document.getElementById('authLogin')?.focus(), 60);
+}
+
+/** Открывает выбор преподавателя */
+function showTeacherPickerModal(onSuccess) {
+  const overlay = document.getElementById('authModalOverlay');
+  const body    = document.getElementById('authModalBody');
+  if (!overlay || !body) return;
+
+  if (State.teachers.length === 0) {
+    showToast('Преподаватели ещё не добавлены', 'error');
+    return;
+  }
+
+  body.innerHTML = `
+    <div style="text-align:center;margin-bottom:1.25rem">
+      <div style="font-size:2.5rem;margin-bottom:.5rem">👤</div>
+      <h2 style="font-family:var(--font-display);color:var(--navy);font-size:1.3rem">Выберите преподавателя</h2>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto">
+      ${State.teachers.map(t => {
+        const color = getColor(teacherIndex(t.id));
+        return `<button class="teacher-picker-btn" data-tid="${t.id}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);cursor:pointer;transition:background .15s;text-align:left">
+          <div style="width:36px;height:36px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+          <div>
+            <div style="font-size:.9rem;font-weight:600;color:var(--navy)">${t.name}</div>
+            <div style="font-size:.75rem;color:var(--text-muted)">${t.dept}</div>
+          </div>
+        </button>`;
+      }).join('')}
+    </div>
+    <button class="btn-modal-clear" id="authCancelBtn" style="margin-top:1rem;width:100%">Отмена</button>`;
+
+  body.querySelectorAll('.teacher-picker-btn').forEach(btn => {
+    btn.addEventListener('mouseenter', () => btn.style.background = 'var(--surface-2)');
+    btn.addEventListener('mouseleave', () => btn.style.background = 'var(--surface)');
+    btn.addEventListener('click', () => {
+      State.currentTeacherId = btn.dataset.tid;
+      hideAuthModal();
+      onSuccess && onSuccess();
+    });
+  });
+  body.querySelector('#authCancelBtn').addEventListener('click', hideAuthModal);
+
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideAuthModal() {
+  const overlay = document.getElementById('authModalOverlay');
+  if (overlay) { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden', 'true'); }
+}
+
+/** Вызывается при клике на "Завуч" в шапке */
+function handleRoleSwitchAdmin() {
+  if (State.currentRole === 'admin') return;
+  showAdminLoginModal(() => {
+    applyRole('admin');
+  });
+}
+
+/** Вызывается при клике на "Преподаватель" в шапке */
+function handleRoleSwitchTeacher() {
+  if (State.currentRole === 'teacher') return;
+  if (State.teachers.length === 0) { showToast('Сначала добавьте преподавателей', 'error'); return; }
+  showTeacherPickerModal(() => {
+    applyRole('teacher');
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── DAY DETAIL PANEL ────────────────────────────────────────────────────────
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) { el.classList.remove('open'); el.setAttribute('aria-hidden', 'true'); }
+  if (id === 'modalOverlay') State.selectedCell = null;
+}
 
 const PAIRS = [
   { n: 1, time: '08:30 – 10:00' },
@@ -962,16 +1105,6 @@ function removePairEntry(key, pairN, idx) {
   entries.splice(idx, 1);
   State.save();
   renderDayPanel(key);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-function closeModal(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.remove('open');
-  el.setAttribute('aria-hidden', 'true');
-  if (id === 'modalOverlay') State.selectedCell = null;
 }
 
 // ─── GLOBAL DEPARTMENT REGISTRY ──────────────────────────────────────────────
@@ -1532,13 +1665,10 @@ function addBlackoutDate() {
 function autoDistribute() {
   if (State.teachers.length === 0) { showToast('Добавьте хотя бы одного преподавателя', 'error'); return; }
 
-  const AUTO_MAX_PER_DAY = 6;   // лимит авто-распределения на один день
-
   const y     = State.currentDate.getFullYear();
   const m     = State.currentDate.getMonth();
   const total = new Date(y, m + 1, 0).getDate();
 
-  // 6-day week: Mon–Sat are workdays; only Sunday (0) is weekend
   const workdays = [];
   for (let d = 1; d <= total; d++) {
     const key = dateKey(y, m, d);
@@ -1546,58 +1676,72 @@ function autoDistribute() {
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
 
-  // Clear only workdays of this month
+  // Очищаем дежурства и расписание пар за этот месяц
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
   workdays.forEach(k => { delete State.duties[k]; delete State.replaceRequests[k]; });
+  Object.keys(State.lessons).forEach(k => { if (k.startsWith(prefix)) delete State.lessons[k]; });
 
   const weekCounts  = {};
   const monthCounts = {};
   State.teachers.forEach(t => { weekCounts[t.id] = {}; monthCounts[t.id] = 0; });
 
+  // ── Шаг 1: назначить ОДНОГО дежурного на каждый рабочий день ──
   workdays.forEach(key => {
     const weekKeys = getWeekKeys(key);
     const weekId   = weekKeys[0];
-    const prevKey  = shiftDay(key, -1);
-    const prevIds  = getDutyIds(prevKey);
 
-    // Сколько назначить на этот день
-    const targetCount = Math.min(AUTO_MAX_PER_DAY, Math.max(1, Math.floor(State.teachers.length / workdays.length * total)));
-    const slotCount   = Math.min(AUTO_MAX_PER_DAY, Math.max(1, targetCount));
+    const candidates = State.teachers.map(t => {
+      const wc = weekCounts[t.id][weekId] || 0;
+      const blackouts = [
+        ...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []),
+        ...(State.blackoutDates[t.id] || []),
+      ];
+      if (blackouts.includes(key)) return null;
+      const overloaded = wc >= t.maxLoad;
+      const score = monthCounts[t.id] * 10 + wc * 100 + (overloaded ? 500 : 0) + Math.random() * 2;
+      return { t, score };
+    }).filter(Boolean).sort((a, b) => a.score - b.score);
 
-    const assignedTodayIds = [];
-
-    for (let slot = 0; slot < slotCount; slot++) {
-      const candidates = State.teachers.map(t => {
-        if (assignedTodayIds.includes(t.id)) return null;  // уже назначен сегодня
-        const wc         = weekCounts[t.id][weekId] || 0;
-        const overloaded = wc >= t.maxLoad;
-        // Consecutive ban removed per user request
-
-        const blackouts = [
-          ...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []),
-          ...(State.blackoutDates[t.id] || []),
-        ];
-        if (blackouts.includes(key)) return null;
-        if (getHolidayName(key)) return null;
-
-        const score = wc * 100 + monthCounts[t.id] * 10 + (overloaded ? 500 : 0) + Math.random() * 2;
-        return { t, score };
-      }).filter(Boolean).sort((a, b) => a.score - b.score);
-
-      if (candidates.length === 0) break;
-
+    if (candidates.length > 0) {
       const winner = candidates[0].t;
-      const primaryDept = Array.isArray(winner.depts) && winner.depts.length ? winner.depts[0] : (winner.dept || null);
-      assignedTodayIds.push(winner.id);
+      const primaryDept = Array.isArray(winner.depts) && winner.depts.length ? winner.depts[0] : (winner.dept || '');
+      State.duties[key] = [{ tid: winner.id, dept: primaryDept }];
       weekCounts[winner.id][weekId] = (weekCounts[winner.id][weekId] || 0) + 1;
       monthCounts[winner.id]++;
-      if (!State.duties[key]) State.duties[key] = [];
-      State.duties[key].push({ tid: winner.id, dept: primaryDept });
     }
+  });
+
+  // ── Шаг 2: распределить преподавателей по 6 парам каждого рабочего дня ──
+  // Каждый преподаватель попадает в одну пару в день (циклически)
+  const pairNums = [1, 2, 3, 4, 5, 6];
+  const pairMonthCounts = {}; // tid → количество пар в месяце
+  State.teachers.forEach(t => { pairMonthCounts[t.id] = 0; });
+
+  workdays.forEach(key => {
+    if (!State.lessons[key]) State.lessons[key] = {};
+    pairNums.forEach(pn => { State.lessons[key][pn] = []; });
+
+    // Перемешиваем преподавателей по баллам (равномерно по парам)
+    const sorted = [...State.teachers].sort((a, b) => pairMonthCounts[a.id] - pairMonthCounts[b.id]);
+
+    sorted.forEach((t, idx) => {
+      // Блокировки
+      const blackouts = [
+        ...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []),
+        ...(State.blackoutDates[t.id] || []),
+      ];
+      if (blackouts.includes(key)) return;
+
+      const pairN = pairNums[idx % pairNums.length];
+      const dept = Array.isArray(t.depts) && t.depts.length ? t.depts[0] : (t.dept || '');
+      State.lessons[key][pairN].push({ tid: t.id, dept, room: '' });
+      pairMonthCounts[t.id]++;
+    });
   });
 
   State.save();
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
-  showToast('Дежурства распределены (учтены праздники и «чёрные метки») ✦', 'success');
+  showToast(`Дежурства и пары распределены на ${workdays.length} дней ✦`, 'success');
 }
 
 function clearAll() {
@@ -1625,6 +1769,8 @@ function printSchedule() {
 // ─── TABS ────────────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
+  // Закрываем боковую панель при смене вкладки — устраняет мелькание
+  if (typeof closeDayPanel === 'function') closeDayPanel();
   // Update all nav buttons (desktop + mobile)
   document.querySelectorAll('.nav-btn, .mob-nav-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
@@ -1678,9 +1824,6 @@ function init() {
     document.getElementById('teacherInfoClose').addEventListener('click', () => closeModal('teacherInfoOverlay'));
     tiOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherInfoOverlay'); });
   }
-
-  // Teacher modal — FIX: объявляем tOverlay перед использованием
-  const tOverlay = document.getElementById('teacherModalOverlay');
   if (tOverlay) {
     document.getElementById('teacherModalClose').addEventListener('click', () => closeModal('teacherModalOverlay'));
     tOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherModalOverlay'); });
@@ -1726,11 +1869,29 @@ function init() {
   // Print
   document.getElementById('printBtn').addEventListener('click', printSchedule);
 
-  // ★ Role switcher
-  document.getElementById('roleAdmin').addEventListener('click', () => applyRole('admin'));
-  document.getElementById('roleTeacher').addEventListener('click', () => {
-    if (State.teachers.length === 0) { showToast('Сначала добавьте преподавателей', 'error'); return; }
-    applyRole('teacher');
+  // ★ Role switcher — теперь с авторизацией
+  document.getElementById('roleAdmin').addEventListener('click', handleRoleSwitchAdmin);
+  document.getElementById('roleTeacher').addEventListener('click', handleRoleSwitchTeacher);
+
+  // authModalOverlay — закрытие по клику вне
+  const authOverlay = document.getElementById('authModalOverlay');
+  if (authOverlay) authOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) hideAuthModal(); });
+
+  // welcomeOverlay — кнопки выбора роли
+  const welAdmin = document.getElementById('welcomeAdminBtn');
+  const welTeacher = document.getElementById('welcomeTeacherBtn');
+  if (welAdmin) welAdmin.addEventListener('click', () => {
+    showAdminLoginModal(() => {
+      hideWelcomeScreen();
+      applyRole('admin');
+    });
+  });
+  if (welTeacher) welTeacher.addEventListener('click', () => {
+    if (State.teachers.length === 0) { showToast('Преподаватели ещё не добавлены', 'error'); return; }
+    showTeacherPickerModal(() => {
+      hideWelcomeScreen();
+      applyRole('teacher');
+    });
   });
 
   // ★ Hamburger
@@ -1774,13 +1935,17 @@ function init() {
   const seedBtn = document.getElementById('seedDemoBtn');
   if (seedBtn) seedBtn.addEventListener('click', seedDemoData);
   // Глобальный доступ для вызова из консоли: seedDemoData()
-  window.seedDemoData = seedDemoData;
+  window.seedDemoData         = seedDemoData;
   window.openTeacherInfoModal = openTeacherInfoModal;
-  window.openDayPanel        = openDayPanel;
-  window.closeDayPanel       = closeDayPanel;
-  window.removeDutyFromPanel = removeDutyFromPanel;
-  window.addPairEntry        = addPairEntry;
-  window.removePairEntry     = removePairEntry;
+  window.openTeacherModal     = openTeacherModal;
+  window.openModal            = openModal;
+  window.closeModal           = closeModal;
+  window.openDayPanel         = openDayPanel;
+  window.closeDayPanel        = closeDayPanel;
+  window.removeDutyFromPanel  = removeDutyFromPanel;
+  window.addPairEntry         = addPairEntry;
+  window.removePairEntry      = removePairEntry;
+  window.hideAuthModal        = hideAuthModal;
 
   // Day panel
   const dpClose = document.getElementById('dayPanelClose');
@@ -1789,12 +1954,15 @@ function init() {
   if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
 
   // Initial render
-  applyRole('admin');
   renderCalendar();
   renderAccordion();
   renderTeachersList();
   renderStats();
   renderNotifications();
+
+  // Показываем экран приветствия при первом заходе
+  // (если нет сохранённой роли, показываем выбор)
+  showWelcomeScreen();
 }
 
 
