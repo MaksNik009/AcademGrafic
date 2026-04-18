@@ -262,6 +262,7 @@ function applyRole(role) {
     }
     if (typeof closeDayPanel === 'function') closeDayPanel();
     switchTab('calendar');
+    renderMyCabinet();
   }
 
   renderCalendar();
@@ -437,6 +438,12 @@ function renderCalendar() {
         avatarGrid.appendChild(av);
       });
       cell.appendChild(avatarGrid);
+      // Show fade only when avatars actually overflow the cell
+      requestAnimationFrame(() => {
+        if (avatarGrid.scrollHeight > avatarGrid.clientHeight + 1) {
+          avatarGrid.classList.add('has-overflow');
+        }
+      });
     } else if (!isHoliday && State.currentRole === 'admin') {
       const hint = document.createElement('div');
       hint.className = 'add-hint';
@@ -1594,12 +1601,23 @@ function renderMyCabinet() {
   const blEl    = document.getElementById('blackoutList');
   if (!listEl || !blEl) return;
 
+  // ── Показываем имя преподавателя в заголовке кабинета ──
+  const cabinetTitle = document.getElementById('cabinetTeacherName');
+  if (cabinetTitle) {
+    const t = teacherById(tid);
+    cabinetTitle.textContent = t ? t.name : '—';
+  }
+
   const y      = State.currentDate.getFullYear();
   const m      = State.currentDate.getMonth();
   const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
 
+  // getDutyEntries возвращает [{tid, dept}] — фильтруем по tid
   const myDuties = Object.keys(State.duties)
-    .filter(k => getDutyIds(k).includes(tid) && k.startsWith(prefix))
+    .filter(k => {
+      if (!k.startsWith(prefix)) return false;
+      return getDutyEntries(k).some(e => e.tid === tid);
+    })
     .sort((a, b) => a.localeCompare(b));
 
   if (!tid || myDuties.length === 0) {
@@ -1885,7 +1903,13 @@ function init() {
   // ★ Notification bell
   document.getElementById('notifBtn').addEventListener('click', e => {
     e.stopPropagation();
-    document.getElementById('notifPanel').classList.toggle('open');
+    const panel = document.getElementById('notifPanel');
+    const btn   = e.currentTarget;
+    const rect  = btn.getBoundingClientRect();
+    // Position panel below the bell button
+    panel.style.top   = (rect.bottom + 8) + 'px';
+    panel.style.right = (window.innerWidth - rect.right) + 'px';
+    panel.classList.toggle('open');
   });
   document.addEventListener('click', e => {
     if (!e.target.closest('.notif-wrap')) {
