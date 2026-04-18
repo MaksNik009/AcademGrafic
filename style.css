@@ -1381,63 +1381,108 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 }
 
 /* ══════════════════════════════════════════════════
-   ★ TEACHER MODE — скрыть вкладки кроме календаря
+   ★ UNIFIED WELCOME / AUTH MODAL
    ══════════════════════════════════════════════════ */
+
+/* Оверлей — поверх всего, не закрывается нажатием вне */
+.wm-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(20, 30, 48, 0.88);
+  backdrop-filter: blur(8px);
+  z-index: 600;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.wm-overlay.open { display: flex; }
+
+/* Карточка */
+.wm-card {
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 2rem 2rem 2rem;
+  max-width: 420px; width: 100%;
+  box-shadow: 0 24px 80px rgba(0,0,0,.4);
+  position: relative;
+  animation: wmSlideUp .28s cubic-bezier(.4,0,.2,1);
+}
+@keyframes wmSlideUp {
+  from { opacity: 0; transform: translateY(22px) scale(.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+/* Кнопка «назад» */
+.wm-back {
+  position: absolute; top: 14px; left: 14px;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 50%; cursor: pointer; font-size: 1rem;
+  color: var(--text-muted); transition: background .15s, color .15s;
+}
+.wm-back:hover { background: var(--blue-light); color: var(--blue); }
+
+/* Лого-строка */
+.wm-logo {
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; margin-bottom: 1.25rem;
+}
+.wm-brand { font-family: var(--font-display); font-size: 1.35rem; font-weight: 800; color: var(--navy); }
+.wm-sub   { font-size: .7rem; color: var(--text-muted); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+
+/* Заголовки */
+.wm-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; color: var(--navy); text-align: center; margin-bottom: .35rem; }
+.wm-hint  { font-size: .86rem; color: var(--text-muted); text-align: center; margin-bottom: 1.5rem; }
+
+/* Карточки выбора роли */
+.wm-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.wm-choice {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 1.25rem .75rem;
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: 14px; cursor: pointer;
+  transition: border-color .18s, background .18s, transform .15s, box-shadow .18s;
+}
+.wm-choice:hover {
+  border-color: var(--blue); background: var(--blue-light);
+  transform: translateY(-3px); box-shadow: 0 8px 24px rgba(74,144,217,.2);
+}
+.wm-choice-icon  { font-size: 2rem; }
+.wm-choice-label { font-size: .95rem; font-weight: 700; color: var(--navy); }
+.wm-choice-sub   { font-size: .68rem; color: var(--text-muted); font-family: var(--font-mono); text-align: center; }
+
+/* Список преподавателей */
+.wm-teacher-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 52vh; overflow-y: auto;
+  padding-right: 2px;
+}
+.wm-teacher-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer; width: 100%;
+  text-align: left;
+  transition: background .14s, border-color .14s;
+}
+.wm-teacher-row:hover { background: var(--blue-light); border-color: var(--blue); }
+.wm-teacher-av {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .72rem; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.wm-teacher-name { font-size: .88rem; font-weight: 600; color: var(--navy); }
+.wm-teacher-dept { font-size: .72rem; color: var(--text-muted); font-family: var(--font-mono); }
+
+/* Teacher mode: hide admin-only tabs */
+body[data-role="teacher"] .admin-only { display: none !important; }
 body[data-role="teacher"] .nav-btn[data-tab="teachers"],
 body[data-role="teacher"] .nav-btn[data-tab="stats"],
 body[data-role="teacher"] .nav-btn[data-tab="cabinet"],
 body[data-role="teacher"] .mob-nav-btn[data-tab="teachers"],
 body[data-role="teacher"] .mob-nav-btn[data-tab="stats"],
 body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !important; }
-
-/* ══════════════════════════════════════════════════
-   ★ WELCOME SCREEN
-   ══════════════════════════════════════════════════ */
-.welcome-overlay {
-  display: none;
-  background: rgba(20,30,48,.92) !important;
-  backdrop-filter: blur(8px);
-  z-index: 500 !important;
-  align-items: center;
-  justify-content: center;
-}
-.welcome-overlay.open { display: flex !important; }
-
-.welcome-card {
-  background: var(--surface);
-  border-radius: 20px;
-  padding: 2.5rem 2rem 2rem;
-  max-width: 440px; width: 90%;
-  box-shadow: 0 24px 80px rgba(0,0,0,.35);
-  text-align: center;
-  animation: slideUpAnim .3s ease;
-}
-@keyframes slideUpAnim {
-  from { opacity:0; transform:translateY(24px); }
-  to   { opacity:1; transform:translateY(0); }
-}
-.welcome-logo {
-  display:flex; align-items:center; justify-content:center;
-  gap:12px; margin-bottom:1.5rem;
-}
-.welcome-brand { font-family:var(--font-display); font-size:1.4rem; font-weight:800; color:var(--navy); }
-.welcome-sub   { font-size:.72rem; color:var(--text-muted); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.08em; }
-.welcome-title { font-family:var(--font-display); font-size:1.6rem; font-weight:700; color:var(--navy); margin-bottom:.4rem; }
-.welcome-hint  { font-size:.88rem; color:var(--text-muted); margin-bottom:1.75rem; }
-
-.welcome-choices { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.welcome-choice {
-  display:flex; flex-direction:column; align-items:center; gap:8px;
-  padding:1.4rem 1rem;
-  background:var(--surface-2);
-  border:2px solid var(--border);
-  border-radius:16px; cursor:pointer;
-  transition:border-color .18s, background .18s, transform .15s, box-shadow .18s;
-}
-.welcome-choice:hover {
-  border-color:var(--blue); background:var(--blue-light);
-  transform:translateY(-2px); box-shadow:0 8px 24px rgba(74,144,217,.18);
-}
-.welcome-choice-icon  { font-size:2.2rem; }
-.welcome-choice-label { font-size:1rem; font-weight:700; color:var(--navy); }
-.welcome-choice-sub   { font-size:.7rem; color:var(--text-muted); font-family:var(--font-mono); }

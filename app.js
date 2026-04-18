@@ -962,102 +962,144 @@ function removePairEntry(key, pairN, idx) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── AUTH / WELCOME SYSTEM ────────────────────────────────────────────────────
+// ─── UNIFIED WELCOME / AUTH MODAL ────────────────────────────────────────────
+// Одно окно, три «страницы»: choose → login (завуч) | picker (препод)
+// Крестик на login/picker возвращает на choose.
 
 const ADMIN_LOGIN    = '123';
 const ADMIN_PASSWORD = '123';
 
-function showWelcomeScreen() {
-  const el = document.getElementById('welcomeOverlay');
-  if (el) el.classList.add('open');
-}
-function hideWelcomeScreen() {
-  const el = document.getElementById('welcomeOverlay');
-  if (el) el.classList.remove('open');
-}
-function hideAuthModal() {
-  const el = document.getElementById('authModalOverlay');
-  if (el) { el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
+/**
+ * page: 'choose' | 'login' | 'picker'
+ * Отображает нужную страницу внутри единого оверлея #welcomeModalOverlay
+ */
+function showWelcomeModal(page) {
+  const overlay = document.getElementById('welcomeModalOverlay');
+  const content = document.getElementById('welcomeModalContent');
+  if (!overlay || !content) return;
+
+  content.innerHTML = _buildWelcomePage(page);
+  overlay.classList.add('open');
+  _wireWelcomePage(page);
 }
 
-function showAdminLoginModal(onSuccess) {
-  const overlay = document.getElementById('authModalOverlay');
-  const body    = document.getElementById('authModalBody');
-  if (!overlay || !body) return;
-  body.innerHTML = `
-    <div style="text-align:center;margin-bottom:1.5rem">
-      <div style="font-size:2.5rem;margin-bottom:.5rem">🔐</div>
-      <h2 style="font-family:var(--font-display);color:var(--navy);font-size:1.3rem">Вход для Завуча</h2>
-      <p style="font-size:.82rem;color:var(--text-muted);margin-top:.25rem">Введите логин и пароль</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:.75rem">
-      <input class="field-input" type="text" id="authLogin" placeholder="Логин" autocomplete="username" style="font-size:1rem"/>
-      <input class="field-input" type="password" id="authPassword" placeholder="Пароль" autocomplete="current-password" style="font-size:1rem"/>
-      <div style="display:flex;align-items:center;gap:.75rem;margin-top:.25rem">
-        <button class="btn-modal-save" id="authSubmitBtn" style="flex:1;padding:.7rem">Войти</button>
-        <span id="authStatus" style="font-size:1.4rem;width:28px;text-align:center;flex-shrink:0"></span>
+function hideWelcomeModal() {
+  const overlay = document.getElementById('welcomeModalOverlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+function _buildWelcomePage(page) {
+  if (page === 'choose') {
+    return `
+      <div class="wm-logo">
+        <svg viewBox="0 0 44 44" fill="none" width="48" height="48">
+          <rect width="44" height="44" rx="11" fill="#2C3E50"/>
+          <rect x="9" y="18" width="8" height="17" rx="2" fill="#3498DB"/>
+          <rect x="18" y="12" width="8" height="23" rx="2" fill="#5DADE2"/>
+          <rect x="27" y="8" width="8" height="27" rx="2" fill="#85C1E9"/>
+          <circle cx="13" cy="13" r="3.5" fill="#F39C12"/>
+        </svg>
+        <div>
+          <div class="wm-brand">АкадемГрафик</div>
+          <div class="wm-sub">Система дежурств</div>
+        </div>
       </div>
-      <button class="btn-modal-clear" id="authCancelBtn" style="margin-top:.25rem">Отмена</button>
-    </div>`;
+      <h2 class="wm-title">Добро пожаловать</h2>
+      <p class="wm-hint">Выберите режим входа</p>
+      <div class="wm-choices">
+        <button class="wm-choice" id="wmChooseAdmin">
+          <span class="wm-choice-icon">🎓</span>
+          <span class="wm-choice-label">Завуч</span>
+          <span class="wm-choice-sub">Управление расписанием</span>
+        </button>
+        <button class="wm-choice" id="wmChooseTeacher">
+          <span class="wm-choice-icon">👤</span>
+          <span class="wm-choice-label">Преподаватель</span>
+          <span class="wm-choice-sub">Просмотр дежурств</span>
+        </button>
+      </div>`;
+  }
 
-  const doLogin = () => {
-    const login = (document.getElementById('authLogin')?.value || '').trim();
-    const pass  = (document.getElementById('authPassword')?.value || '').trim();
-    const status = document.getElementById('authStatus');
-    if (login === ADMIN_LOGIN && pass === ADMIN_PASSWORD) {
-      if (status) status.textContent = '✅';
-      setTimeout(() => { hideAuthModal(); onSuccess && onSuccess(); }, 400);
-    } else {
-      if (status) status.textContent = '❌';
-      const pwd = document.getElementById('authPassword');
-      if (pwd) pwd.value = '';
-      setTimeout(() => { const s = document.getElementById('authStatus'); if (s) s.textContent = ''; }, 1500);
-    }
-  };
-  body.querySelector('#authSubmitBtn').addEventListener('click', doLogin);
-  body.querySelector('#authCancelBtn').addEventListener('click', hideAuthModal);
-  body.querySelector('#authPassword').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
-  overlay.classList.add('open'); overlay.setAttribute('aria-hidden','false');
-  setTimeout(() => document.getElementById('authLogin')?.focus(), 60);
+  if (page === 'login') {
+    return `
+      <button class="wm-back" id="wmBack" title="Назад">←</button>
+      <div style="text-align:center;margin-bottom:1.25rem">
+        <div style="font-size:2.2rem;margin-bottom:.4rem">🔐</div>
+        <h2 class="wm-title" style="margin-bottom:.25rem">Вход для Завуча</h2>
+        <p class="wm-hint">Введите логин и пароль</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.75rem">
+        <input class="field-input" type="text"     id="authLogin"    placeholder="Логин"  autocomplete="username"         style="font-size:1rem"/>
+        <input class="field-input" type="password" id="authPassword" placeholder="Пароль" autocomplete="current-password" style="font-size:1rem"/>
+        <div style="display:flex;align-items:center;gap:.75rem;margin-top:.25rem">
+          <button class="btn-modal-save" id="authSubmit" style="flex:1;padding:.7rem">Войти</button>
+          <span id="authStatus" style="font-size:1.4rem;width:28px;text-align:center;flex-shrink:0"></span>
+        </div>
+      </div>`;
+  }
+
+  if (page === 'picker') {
+    const rows = State.teachers.map(t => {
+      const color = getColor(teacherIndex(t.id));
+      return `<button class="wm-teacher-row" data-tid="${t.id}">
+        <div class="wm-teacher-av" style="background:${color}">${initials(t.name)}</div>
+        <div>
+          <div class="wm-teacher-name">${t.name}</div>
+          <div class="wm-teacher-dept">${t.dept || ''}</div>
+        </div>
+      </button>`;
+    }).join('');
+    return `
+      <button class="wm-back" id="wmBack" title="Назад">←</button>
+      <div style="text-align:center;margin-bottom:1rem">
+        <div style="font-size:2.2rem;margin-bottom:.4rem">👤</div>
+        <h2 class="wm-title" style="margin-bottom:0">Выберите преподавателя</h2>
+      </div>
+      <div class="wm-teacher-list">${rows}</div>`;
+  }
+  return '';
 }
 
-function showTeacherPickerModal(onSuccess) {
-  const overlay = document.getElementById('authModalOverlay');
-  const body    = document.getElementById('authModalBody');
-  if (!overlay || !body) return;
-  if (State.teachers.length === 0) { showToast('Преподаватели ещё не добавлены', 'error'); return; }
-
-  body.innerHTML = `
-    <div style="text-align:center;margin-bottom:1.25rem">
-      <div style="font-size:2.5rem;margin-bottom:.5rem">👤</div>
-      <h2 style="font-family:var(--font-display);color:var(--navy);font-size:1.3rem">Выберите преподавателя</h2>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto">
-      ${State.teachers.map(t => {
-        const color = getColor(teacherIndex(t.id));
-        return `<button class="teacher-picker-btn" data-tid="${t.id}"
-          style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);cursor:pointer;transition:background .15s;text-align:left;width:100%">
-          <div style="width:36px;height:36px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
-          <div>
-            <div style="font-size:.9rem;font-weight:600;color:var(--navy)">${t.name}</div>
-            <div style="font-size:.75rem;color:var(--text-muted)">${t.dept || ''}</div>
-          </div>
-        </button>`;
-      }).join('')}
-    </div>
-    <button class="btn-modal-clear" id="authCancelBtn" style="margin-top:1rem;width:100%">Отмена</button>`;
-
-  body.querySelectorAll('.teacher-picker-btn').forEach(btn => {
-    btn.addEventListener('mouseenter', () => btn.style.background = 'var(--surface-2)');
-    btn.addEventListener('mouseleave', () => btn.style.background = 'var(--surface)');
-    btn.addEventListener('click', () => {
-      State.currentTeacherId = btn.dataset.tid;
-      hideAuthModal();
-      onSuccess && onSuccess();
+function _wireWelcomePage(page) {
+  if (page === 'choose') {
+    document.getElementById('wmChooseAdmin')?.addEventListener('click', () => showWelcomeModal('login'));
+    document.getElementById('wmChooseTeacher')?.addEventListener('click', () => {
+      if (State.teachers.length === 0) { showToast('Преподаватели ещё не добавлены', 'error'); return; }
+      showWelcomeModal('picker');
     });
-  });
-  body.querySelector('#authCancelBtn').addEventListener('click', hideAuthModal);
-  overlay.classList.add('open'); overlay.setAttribute('aria-hidden','false');
+  }
+
+  if (page === 'login') {
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
+    const doLogin = () => {
+      const login = (document.getElementById('authLogin')?.value || '').trim();
+      const pass  = (document.getElementById('authPassword')?.value || '').trim();
+      const status = document.getElementById('authStatus');
+      if (login === ADMIN_LOGIN && pass === ADMIN_PASSWORD) {
+        if (status) status.textContent = '✅';
+        setTimeout(() => { hideWelcomeModal(); applyRole('admin'); }, 350);
+      } else {
+        if (status) status.textContent = '❌';
+        const pwd = document.getElementById('authPassword');
+        if (pwd) pwd.value = '';
+        setTimeout(() => { const s = document.getElementById('authStatus'); if (s) s.textContent = ''; }, 1500);
+      }
+    };
+    document.getElementById('authSubmit')?.addEventListener('click', doLogin);
+    document.getElementById('authPassword')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+    setTimeout(() => document.getElementById('authLogin')?.focus(), 60);
+  }
+
+  if (page === 'picker') {
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
+    document.querySelectorAll('.wm-teacher-row').forEach(btn => {
+      btn.addEventListener('click', () => {
+        State.currentTeacherId = btn.dataset.tid;
+        hideWelcomeModal();
+        applyRole('teacher');
+      });
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1721,7 +1763,6 @@ function printSchedule() {
 // ─── TABS ────────────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
-  // Закрываем боковую панель — устраняет мелькание при смене вкладок
   if (typeof closeDayPanel === 'function') closeDayPanel();
   document.querySelectorAll('.nav-btn, .mob-nav-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
@@ -1775,7 +1816,7 @@ function init() {
     document.getElementById('teacherInfoClose').addEventListener('click', () => closeModal('teacherInfoOverlay'));
     tiOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal('teacherInfoOverlay'); });
   }
-  // Teacher modal — объявляем tOverlay перед использованием
+  // Teacher modal — FIX: объявляем tOverlay перед использованием
   const tOverlay = document.getElementById('teacherModalOverlay');
   if (tOverlay) {
     document.getElementById('teacherModalClose').addEventListener('click', () => closeModal('teacherModalOverlay'));
@@ -1825,27 +1866,12 @@ function init() {
   // ★ Role switcher — с авторизацией
   document.getElementById('roleAdmin').addEventListener('click', () => {
     if (State.currentRole === 'admin') return;
-    showAdminLoginModal(() => applyRole('admin'));
+    showWelcomeModal('login');
   });
   document.getElementById('roleTeacher').addEventListener('click', () => {
     if (State.currentRole === 'teacher') return;
     if (State.teachers.length === 0) { showToast('Сначала добавьте преподавателей', 'error'); return; }
-    showTeacherPickerModal(() => applyRole('teacher'));
-  });
-
-  // authModalOverlay — закрытие по клику вне
-  const authOverlay = document.getElementById('authModalOverlay');
-  if (authOverlay) authOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) hideAuthModal(); });
-
-  // welcomeOverlay — кнопки
-  const welAdmin = document.getElementById('welcomeAdminBtn');
-  const welTeacher = document.getElementById('welcomeTeacherBtn');
-  if (welAdmin) welAdmin.addEventListener('click', () => {
-    showAdminLoginModal(() => { hideWelcomeScreen(); applyRole('admin'); });
-  });
-  if (welTeacher) welTeacher.addEventListener('click', () => {
-    if (State.teachers.length === 0) { showToast('Преподаватели ещё не добавлены', 'error'); return; }
-    showTeacherPickerModal(() => { hideWelcomeScreen(); applyRole('teacher'); });
+    showWelcomeModal('picker');
   });
 
   // ★ Hamburger
@@ -1889,13 +1915,18 @@ function init() {
   const seedBtn = document.getElementById('seedDemoBtn');
   if (seedBtn) seedBtn.addEventListener('click', seedDemoData);
   // Глобальный доступ для вызова из консоли: seedDemoData()
-  window.seedDemoData = seedDemoData;
+  window.seedDemoData         = seedDemoData;
   window.openTeacherInfoModal = openTeacherInfoModal;
-  window.openDayPanel        = openDayPanel;
-  window.closeDayPanel       = closeDayPanel;
-  window.removeDutyFromPanel = removeDutyFromPanel;
-  window.addPairEntry        = addPairEntry;
-  window.removePairEntry     = removePairEntry;
+  window.openTeacherModal     = openTeacherModal;
+  window.openModal            = openModal;
+  window.closeModal           = closeModal;
+  window.openDayPanel         = openDayPanel;
+  window.closeDayPanel        = closeDayPanel;
+  window.removeDutyFromPanel  = removeDutyFromPanel;
+  window.addPairEntry         = addPairEntry;
+  window.removePairEntry      = removePairEntry;
+  window.showWelcomeModal     = showWelcomeModal;
+  window.hideWelcomeModal     = hideWelcomeModal;
 
   // Day panel
   const dpClose = document.getElementById('dayPanelClose');
@@ -1903,15 +1934,21 @@ function init() {
   const dpBackdrop = document.getElementById('dayPanelBackdrop');
   if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
 
-  // Initial render (без роли — покажем экран выбора)
+  // Welcome modal wiring (единое окно)
+  const wOverlay = document.getElementById('welcomeModalOverlay');
+  if (wOverlay) wOverlay.addEventListener('click', e => {
+    if (e.target === e.currentTarget) hideWelcomeModal();
+  });
+
+  // Initial render
   renderCalendar();
   renderAccordion();
   renderTeachersList();
   renderStats();
   renderNotifications();
 
-  // Показываем экран выбора роли при каждом заходе
-  showWelcomeScreen();
+  // Показываем экран выбора роли при каждом открытии
+  showWelcomeModal('choose');
 }
 
 
