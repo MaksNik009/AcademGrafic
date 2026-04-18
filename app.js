@@ -421,11 +421,29 @@ function renderCalendar() {
     }
 
     // ── Compact avatar grid (no text) ─────────────────────────────────
+    // Собираем ВСЕХ: дежурные + преподаватели из пар (без дублей по tid)
     const dutyEntries = getDutyEntries(key);
-    if (!isHoliday && dutyEntries.length > 0) {
+    const seenTids = new Set();
+    const allCellEntries = [];
+
+    // 1. Сначала дежурные (они идут первыми)
+    dutyEntries.forEach(e => {
+      if (!seenTids.has(e.tid)) { seenTids.add(e.tid); allCellEntries.push({ tid: e.tid, dept: e.dept, isDuty: true }); }
+    });
+
+    // 2. Затем преподаватели из пар этого дня
+    if (State.lessons[key]) {
+      [1,2,3,4,5,6].forEach(pn => {
+        (State.lessons[key][pn] || []).forEach(e => {
+          if (!seenTids.has(e.tid)) { seenTids.add(e.tid); allCellEntries.push({ tid: e.tid, dept: e.dept, isDuty: false }); }
+        });
+      });
+    }
+
+    if (!isHoliday && allCellEntries.length > 0) {
       const avatarGrid = document.createElement('div');
       avatarGrid.className = 'cell-avatar-grid';
-      dutyEntries.forEach(entry => {
+      allCellEntries.forEach(entry => {
         const teacher = teacherById(entry.tid);
         if (!teacher) return;
         const color = getColor(teacherIndex(entry.tid));
@@ -433,14 +451,9 @@ function renderCalendar() {
         av.className = 'cell-avatar';
         av.style.background = color;
         av.textContent = initials(teacher.name);
-        av.title = teacher.name + (entry.dept ? ' · ' + entry.dept : '');
-        // Only admin can click avatar to open info popup
-        if (State.currentRole === 'admin') {
-          av.style.cursor = 'pointer';
-          av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
-        } else {
-          av.style.cursor = 'default';
-        }
+        av.title = teacher.name + (entry.dept ? ' · ' + entry.dept : '') + (entry.isDuty ? ' ⭐' : '');
+        av.style.cursor = 'pointer';
+        av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
         avatarGrid.appendChild(av);
       });
       cell.appendChild(avatarGrid);
@@ -1273,7 +1286,7 @@ function openTeacherInfoModal(tid) {
     </div>` : ''}
     <div class="modal-actions" style="margin-top:1.25rem">
       <button class="btn-modal-clear" onclick="closeModal('teacherInfoOverlay')">Закрыть</button>
-      <button class="btn-modal-save" onclick="closeModal('teacherInfoOverlay');openTeacherModal('${tid}')">✏️ Редактировать</button>
+      ${State.currentRole === 'admin' ? `<button class="btn-modal-save" onclick="closeModal('teacherInfoOverlay');openTeacherModal('${tid}')">✏️ Редактировать</button>` : ''}
     </div>`;
 
   const overlay = document.getElementById('teacherInfoOverlay');
@@ -2010,16 +2023,26 @@ async function seedDemoData() {
   if (!sb) { showToast('Supabase не подключён', 'error'); return; }
 
   const demoTeachers = [
-    { id: 'demo_01', name: 'Иванов Сергей Николаевич',    dept: 'Кафедра математики',                phone: '+7 (910) 234-56-78', max_load: 2, blackout_dates: [] },
-    { id: 'demo_02', name: 'Петрова Ольга Дмитриевна',    dept: 'Кафедра информатики и ВТ',          phone: '+7 (926) 345-67-89', max_load: 2, blackout_dates: [] },
-    { id: 'demo_03', name: 'Смирнов Алексей Юрьевич',     dept: 'Кафедра физики',                    phone: '+7 (905) 456-78-90', max_load: 3, blackout_dates: [] },
-    { id: 'demo_04', name: 'Козлова Наталья Владимировна', dept: 'Кафедра химии и биологии',          phone: '+7 (916) 567-89-01', max_load: 2, blackout_dates: [] },
-    { id: 'demo_05', name: 'Новиков Дмитрий Александрович',dept: 'Кафедра истории и обществознания', phone: '+7 (999) 678-90-12', max_load: 2, blackout_dates: [] },
-    { id: 'demo_06', name: 'Морозова Татьяна Игоревна',   dept: 'Кафедра русского языка и литературы',phone: '+7 (903) 789-01-23', max_load: 2, blackout_dates: [] },
-    { id: 'demo_07', name: 'Волков Андрей Петрович',      dept: 'Кафедра иностранных языков',        phone: '+7 (925) 890-12-34', max_load: 3, blackout_dates: [] },
-    { id: 'demo_08', name: 'Лебедева Марина Сергеевна',   dept: 'Кафедра физической культуры',       phone: '+7 (909) 901-23-45', max_load: 2, blackout_dates: [] },
-    { id: 'demo_09', name: 'Соколов Павел Евгеньевич',    dept: 'Кафедра экономики и права',         phone: '+7 (911) 012-34-56', max_load: 2, blackout_dates: [] },
-    { id: 'demo_10', name: 'Попова Елена Константиновна', dept: 'Кафедра психологии и педагогики',   phone: '+7 (917) 123-45-67', max_load: 3, blackout_dates: [] },
+    { id: 'demo_01', name: 'Иванов Сергей Николаевич',      dept: 'Кафедра математики',                  phone: '+7 (910) 234-56-78', max_load: 2, blackout_dates: [] },
+    { id: 'demo_02', name: 'Петрова Ольга Дмитриевна',      dept: 'Кафедра информатики и ВТ',            phone: '+7 (926) 345-67-89', max_load: 2, blackout_dates: [] },
+    { id: 'demo_03', name: 'Смирнов Алексей Юрьевич',       dept: 'Кафедра физики',                      phone: '+7 (905) 456-78-90', max_load: 3, blackout_dates: [] },
+    { id: 'demo_04', name: 'Козлова Наталья Владимировна',  dept: 'Кафедра химии и биологии',            phone: '+7 (916) 567-89-01', max_load: 2, blackout_dates: [] },
+    { id: 'demo_05', name: 'Новиков Дмитрий Александрович', dept: 'Кафедра истории и обществознания',    phone: '+7 (999) 678-90-12', max_load: 2, blackout_dates: [] },
+    { id: 'demo_06', name: 'Морозова Татьяна Игоревна',     dept: 'Кафедра русского языка и литературы', phone: '+7 (903) 789-01-23', max_load: 2, blackout_dates: [] },
+    { id: 'demo_07', name: 'Волков Андрей Петрович',        dept: 'Кафедра иностранных языков',          phone: '+7 (925) 890-12-34', max_load: 3, blackout_dates: [] },
+    { id: 'demo_08', name: 'Лебедева Марина Сергеевна',     dept: 'Кафедра физической культуры',         phone: '+7 (909) 901-23-45', max_load: 2, blackout_dates: [] },
+    { id: 'demo_09', name: 'Соколов Павел Евгеньевич',      dept: 'Кафедра экономики и права',           phone: '+7 (911) 012-34-56', max_load: 2, blackout_dates: [] },
+    { id: 'demo_10', name: 'Попова Елена Константиновна',   dept: 'Кафедра психологии и педагогики',     phone: '+7 (917) 123-45-67', max_load: 3, blackout_dates: [] },
+    { id: 'demo_11', name: 'Кузнецов Игорь Васильевич',     dept: 'Кафедра математики',                  phone: '+7 (912) 234-56-78', max_load: 2, blackout_dates: [] },
+    { id: 'demo_12', name: 'Белова Анна Михайловна',        dept: 'Кафедра информатики и ВТ',            phone: '+7 (920) 345-67-89', max_load: 2, blackout_dates: [] },
+    { id: 'demo_13', name: 'Орлов Максим Андреевич',        dept: 'Кафедра физики',                      phone: '+7 (913) 456-78-90', max_load: 2, blackout_dates: [] },
+    { id: 'demo_14', name: 'Захарова Светлана Олеговна',    dept: 'Кафедра химии и биологии',            phone: '+7 (921) 567-89-01', max_load: 2, blackout_dates: [] },
+    { id: 'demo_15', name: 'Федоров Роман Викторович',      dept: 'Кафедра истории и обществознания',    phone: '+7 (914) 678-90-12', max_load: 3, blackout_dates: [] },
+    { id: 'demo_16', name: 'Громова Юлия Алексеевна',       dept: 'Кафедра русского языка и литературы', phone: '+7 (922) 789-01-23', max_load: 2, blackout_dates: [] },
+    { id: 'demo_17', name: 'Тихонов Артём Борисович',       dept: 'Кафедра иностранных языков',          phone: '+7 (915) 890-12-34', max_load: 2, blackout_dates: [] },
+    { id: 'demo_18', name: 'Макарова Диана Руслановна',     dept: 'Кафедра физической культуры',         phone: '+7 (923) 901-23-45', max_load: 2, blackout_dates: [] },
+    { id: 'demo_19', name: 'Степанов Кирилл Николаевич',    dept: 'Кафедра экономики и права',           phone: '+7 (918) 012-34-56', max_load: 3, blackout_dates: [] },
+    { id: 'demo_20', name: 'Васильева Надежда Геннадьевна', dept: 'Кафедра психологии и педагогики',     phone: '+7 (924) 123-45-67', max_load: 2, blackout_dates: [] },
   ];
 
   const { error } = await sb.from('teachers').upsert(demoTeachers, { onConflict: 'id' });
