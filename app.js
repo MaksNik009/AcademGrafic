@@ -434,7 +434,13 @@ function renderCalendar() {
         av.style.background = color;
         av.textContent = initials(teacher.name);
         av.title = teacher.name + (entry.dept ? ' · ' + entry.dept : '');
-        av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
+        // Only admin can click avatar to open info popup
+        if (State.currentRole === 'admin') {
+          av.style.cursor = 'pointer';
+          av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
+        } else {
+          av.style.cursor = 'default';
+        }
         avatarGrid.appendChild(av);
       });
       cell.appendChild(avatarGrid);
@@ -1688,13 +1694,12 @@ function addBlackoutDate() {
 function autoDistribute() {
   if (State.teachers.length === 0) { showToast('Добавьте хотя бы одного преподавателя', 'error'); return; }
 
-  const AUTO_MAX_PER_DAY = 6;   // лимит авто-распределения на один день
-
   const y     = State.currentDate.getFullYear();
   const m     = State.currentDate.getMonth();
   const total = new Date(y, m + 1, 0).getDate();
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
 
-  // 6-day week: Mon–Sat are workdays; only Sunday (0) is weekend
+  // Собираем рабочие дни
   const workdays = [];
   for (let d = 1; d <= total; d++) {
     const key = dateKey(y, m, d);
@@ -1702,58 +1707,73 @@ function autoDistribute() {
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
 
-  // Clear only workdays of this month
+  // Очищаем дежурства И расписание пар текущего месяца
   workdays.forEach(k => { delete State.duties[k]; delete State.replaceRequests[k]; });
+  Object.keys(State.lessons).forEach(k => { if (k.startsWith(prefix)) delete State.lessons[k]; });
 
-  const weekCounts  = {};
-  const monthCounts = {};
+  const weekCounts  = {};  // tid → { weekId → count }
+  const monthCounts = {};  // tid → total duties this month
   State.teachers.forEach(t => { weekCounts[t.id] = {}; monthCounts[t.id] = 0; });
+
+  const PAIR_NUMS = [1, 2, 3, 4, 5, 6];
+  const pairCounts = {}; // tid → total pairs assigned
+  State.teachers.forEach(t => { pairCounts[t.id] = 0; });
 
   workdays.forEach(key => {
     const weekKeys = getWeekKeys(key);
     const weekId   = weekKeys[0];
-    const prevKey  = shiftDay(key, -1);
-    const prevIds  = getDutyIds(prevKey);
 
-    // Сколько назначить на этот день
-    const targetCount = Math.min(AUTO_MAX_PER_DAY, Math.max(1, Math.floor(State.teachers.length / workdays.length * total)));
-    const slotCount   = Math.min(AUTO_MAX_PER_DAY, Math.max(1, targetCount));
+    // ── ШАГ 1: Выбрать ОДНОГО дежурного на весь день ──────────────────
+    const blackoutCheck = (t) => {
+      const bl = [...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []), ...(State.blackoutDates[t.id] || [])];
+      return bl.includes(key);
+    };
 
-    const assignedTodayIds = [];
-
-    for (let slot = 0; slot < slotCount; slot++) {
-      const candidates = State.teachers.map(t => {
-        if (assignedTodayIds.includes(t.id)) return null;  // уже назначен сегодня
-        const wc         = weekCounts[t.id][weekId] || 0;
-        const overloaded = wc >= t.maxLoad;
-        // Consecutive ban removed per user request
-
-        const blackouts = [
-          ...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []),
-          ...(State.blackoutDates[t.id] || []),
-        ];
-        if (blackouts.includes(key)) return null;
-        if (getHolidayName(key)) return null;
-
-        const score = wc * 100 + monthCounts[t.id] * 10 + (overloaded ? 500 : 0) + Math.random() * 2;
+    const dutyCandidates = State.teachers
+      .filter(t => !blackoutCheck(t))
+      .map(t => {
+        const wc = weekCounts[t.id][weekId] || 0;
+        const score = monthCounts[t.id] * 10 + wc * 100 + (wc >= t.maxLoad ? 500 : 0) + Math.random();
         return { t, score };
-      }).filter(Boolean).sort((a, b) => a.score - b.score);
+      })
+      .sort((a, b) => a.score - b.score);
 
-      if (candidates.length === 0) break;
-
-      const winner = candidates[0].t;
-      const primaryDept = Array.isArray(winner.depts) && winner.depts.length ? winner.depts[0] : (winner.dept || null);
-      assignedTodayIds.push(winner.id);
-      weekCounts[winner.id][weekId] = (weekCounts[winner.id][weekId] || 0) + 1;
-      monthCounts[winner.id]++;
-      if (!State.duties[key]) State.duties[key] = [];
-      State.duties[key].push({ tid: winner.id, dept: primaryDept });
+    let dutyTeacher = null;
+    if (dutyCandidates.length > 0) {
+      dutyTeacher = dutyCandidates[0].t;
+      const dept = Array.isArray(dutyTeacher.depts) && dutyTeacher.depts.length
+        ? dutyTeacher.depts[0] : (dutyTeacher.dept || '');
+      State.duties[key] = [{ tid: dutyTeacher.id, dept }];
+      weekCounts[dutyTeacher.id][weekId] = (weekCounts[dutyTeacher.id][weekId] || 0) + 1;
+      monthCounts[dutyTeacher.id]++;
     }
+
+    // ── ШАГ 2: Распределить ВСЕХ преподавателей по 6 парам ────────────
+    // Дежурный тоже получает пару (он не исключается)
+    if (!State.lessons[key]) State.lessons[key] = {};
+    PAIR_NUMS.forEach(pn => { State.lessons[key][pn] = []; });
+
+    // Сортируем по количеству пар — у кого меньше, тот идёт первым
+    const teachersSorted = [...State.teachers]
+      .filter(t => !blackoutCheck(t))
+      .sort((a, b) => pairCounts[a.id] - pairCounts[b.id] + Math.random() * 0.5);
+
+    // Каждый получает одну пару в этот день (циклически по 6 слотам)
+    teachersSorted.forEach((t, idx) => {
+      const pairN = PAIR_NUMS[idx % PAIR_NUMS.length];
+      const dept  = Array.isArray(t.depts) && t.depts.length ? t.depts[0] : (t.dept || '');
+      State.lessons[key][pairN].push({ tid: t.id, dept, room: '' });
+      pairCounts[t.id]++;
+    });
   });
 
   State.save();
-  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
-  showToast('Дежурства распределены (учтены праздники и «чёрные метки») ✦', 'success');
+  renderCalendar();
+  renderAccordion();
+  renderTeachersList();
+  renderStats();
+  renderMyCabinet();
+  showToast(`Распределено: ${workdays.length} дней, дежурные + пары заполнены ✦`, 'success');
 }
 
 function clearAll() {
@@ -1781,7 +1801,16 @@ function printSchedule() {
 // ─── TABS ────────────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
-  if (typeof closeDayPanel === 'function') closeDayPanel();
+  // Мгновенно скрываем боковую панель — убирает мелькание при переходе вкладок
+  const dpanel = document.getElementById('dayPanel');
+  const dbackdrop = document.getElementById('dayPanelBackdrop');
+  if (dpanel) { dpanel.classList.remove('open'); dpanel.style.visibility = 'hidden'; }
+  if (dbackdrop) dbackdrop.classList.remove('open');
+  document.body.classList.remove('panel-open');
+  State.activeDayKey = null;
+  // Restore visibility after transition completes
+  setTimeout(() => { if (dpanel) dpanel.style.visibility = ''; }, 320);
+
   document.querySelectorAll('.nav-btn, .mob-nav-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
     if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page');
