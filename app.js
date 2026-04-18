@@ -941,10 +941,14 @@ function renderDayPanel(key) {
         <div class="pair-teachers-list" id="pair-list-${key}-${p.n}">${entriesHtml}</div>
         ${isAdmin ? `<div class="pair-add-row" id="pair-add-${key}-${p.n}">
           <div class="select-wrap" style="flex:1;min-width:0">
-            <select class="field-input field-select pair-teacher-sel" style="height:32px;font-size:.78rem" id="pair-tsel-${key}-${p.n}">
+            <select class="field-input field-select pair-teacher-sel" style="height:32px;font-size:.78rem" id="pair-tsel-${key}-${p.n}"
+              onchange="updatePairDeptSel('${key}',${p.n})">
               <option value="">— Преподаватель —</option>
               ${State.teachers.map(t => `<option value="${t.id}">${t.name.split(' ').slice(0,2).join(' ')}</option>`).join('')}
             </select>
+          </div>
+          <div id="pair-dept-wrap-${key}-${p.n}" style="display:none;min-width:0;flex:1">
+            <select class="field-input field-select" style="height:32px;font-size:.75rem" id="pair-dept-${key}-${p.n}"></select>
           </div>
           <input class="field-input" placeholder="Кабинет" style="width:72px;height:32px;font-size:.78rem" id="pair-room-${key}-${p.n}"/>
           <button class="day-panel-add-btn" style="padding:0 10px;height:32px;font-size:.75rem" onclick="addPairEntry('${key}',${p.n})">+</button>
@@ -964,16 +968,38 @@ function removeDutyFromPanel(key, tid, dept) {
   renderStats();
 }
 
+/** Показывает/скрывает выбор кафедры при смене преподавателя в форме пары */
+function updatePairDeptSel(key, pairN) {
+  const tSel    = document.getElementById(`pair-tsel-${key}-${pairN}`);
+  const wrap    = document.getElementById(`pair-dept-wrap-${key}-${pairN}`);
+  const deptSel = document.getElementById(`pair-dept-${key}-${pairN}`);
+  if (!tSel || !wrap || !deptSel) return;
+
+  const tid = tSel.value;
+  const t   = teacherById(tid);
+  const depts = t ? (Array.isArray(t.depts) && t.depts.length ? t.depts : [t.dept].filter(Boolean)) : [];
+
+  if (depts.length > 1) {
+    deptSel.innerHTML = depts.map(d => `<option value="${d}">${d}</option>`).join('');
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
 function addPairEntry(key, pairN) {
-  const tSel = document.getElementById(`pair-tsel-${key}-${pairN}`);
-  const roomEl = document.getElementById(`pair-room-${key}-${pairN}`);
+  const tSel    = document.getElementById(`pair-tsel-${key}-${pairN}`);
+  const roomEl  = document.getElementById(`pair-room-${key}-${pairN}`);
+  const deptSel = document.getElementById(`pair-dept-${key}-${pairN}`);
   const tid = tSel?.value;
   if (!tid) { showToast('Выберите преподавателя', 'error'); return; }
-  const t = teacherById(tid);
+  const t     = teacherById(tid);
   const depts = Array.isArray(t?.depts) && t.depts.length ? t.depts : [t?.dept].filter(Boolean);
+  // Берём выбранную кафедру из дроп-дауна (если он виден) или первую по умолчанию
+  const dept = (deptSel && deptSel.closest('[style*="block"]')) ? deptSel.value : (depts[0] || '');
   const room = (roomEl?.value || '').trim();
   const entries = getPairEntries(key, pairN);
-  entries.push({ tid, dept: depts[0] || '', room });
+  entries.push({ tid, dept, room });
   State.save();
   renderDayPanel(key);
   showToast('Преподаватель добавлен в пару', 'success');
@@ -1761,22 +1787,37 @@ function autoDistribute() {
       monthCounts[dutyTeacher.id]++;
     }
 
-    // ── ШАГ 2: Распределить ВСЕХ преподавателей по 6 парам ────────────
-    // Дежурный тоже получает пару (он не исключается)
+    // ── ШАГ 2: Распределить преподавателей по парам — с разнобоем ──────
     if (!State.lessons[key]) State.lessons[key] = {};
     PAIR_NUMS.forEach(pn => { State.lessons[key][pn] = []; });
 
-    // Сортируем по количеству пар — у кого меньше, тот идёт первым
-    const teachersSorted = [...State.teachers]
-      .filter(t => !blackoutCheck(t))
-      .sort((a, b) => pairCounts[a.id] - pairCounts[b.id] + Math.random() * 0.5);
+    // Перемешиваем учителей случайно (Fisher-Yates)
+    const shuffled = [...State.teachers].filter(t => !blackoutCheck(t));
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
 
-    // Каждый получает одну пару в этот день (циклически по 6 слотам)
-    teachersSorted.forEach((t, idx) => {
-      const pairN = PAIR_NUMS[idx % PAIR_NUMS.length];
-      const dept  = Array.isArray(t.depts) && t.depts.length ? t.depts[0] : (t.dept || '');
-      State.lessons[key][pairN].push({ tid: t.id, dept, room: '' });
-      pairCounts[t.id]++;
+    // Случайное количество преподавателей на пару: от 1 до 4
+    // Распределяем по парам с разным наполнением
+    let tIdx = 0;
+    const totalTeachers = shuffled.length;
+    PAIR_NUMS.forEach((pairN, pairIdx) => {
+      // Случайный размер слота: чтобы суммарно охватить всех, но с разбросом
+      const remaining = totalTeachers - tIdx;
+      const pairsLeft = PAIR_NUMS.length - pairIdx;
+      const minPerPair = Math.max(1, Math.floor(remaining / pairsLeft / 2));
+      const maxPerPair = Math.min(4, Math.ceil(remaining / pairsLeft * 1.5));
+      const slotSize   = Math.max(0, minPerPair + Math.floor(Math.random() * (maxPerPair - minPerPair + 1)));
+
+      for (let s = 0; s < slotSize && tIdx < totalTeachers; s++, tIdx++) {
+        const t = shuffled[tIdx];
+        const dept = Array.isArray(t.depts) && t.depts.length ? t.depts[0] : (t.dept || '');
+        // Авто-кабинет: 100–599, привязан к преподавателю стабильно
+        const roomBase = 100 + (teacherIndex(t.id) * 37 + pairN * 13) % 500;
+        State.lessons[key][pairN].push({ tid: t.id, dept, room: String(roomBase) });
+        pairCounts[t.id]++;
+      }
     });
   });
 
@@ -1991,6 +2032,7 @@ function init() {
   window.removeDutyFromPanel  = removeDutyFromPanel;
   window.addPairEntry         = addPairEntry;
   window.removePairEntry      = removePairEntry;
+  window.updatePairDeptSel    = updatePairDeptSel;
   window.showWelcomeModal     = showWelcomeModal;
   window.hideWelcomeModal     = hideWelcomeModal;
 
