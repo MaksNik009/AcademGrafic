@@ -2044,9 +2044,8 @@ function init() {
 
   // Welcome modal wiring (единое окно)
   const wOverlay = document.getElementById('welcomeModalOverlay');
-  if (wOverlay) wOverlay.addEventListener('click', e => {
-    if (e.target === e.currentTarget) hideWelcomeModal();
-  });
+  // welcomeModalOverlay — клик вне карточки НЕ закрывает (обязательный выбор роли)
+  if (wOverlay) wOverlay.addEventListener('click', e => e.stopPropagation());
 
   // Initial render
   renderCalendar();
