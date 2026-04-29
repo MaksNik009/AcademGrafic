@@ -631,24 +631,18 @@ body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
 .role-btn--teacher.active{ background: #1A7A4A; color: #fff; }
 
 /* ── HAMBURGER ── */
-.hamburger {
-  display: none; flex-direction: column; justify-content: center;
-  gap: 5px; width: 38px; height: 38px;
-  background: transparent; border: 1px solid rgba(255,255,255,.2);
-  border-radius: var(--radius); padding: 8px; cursor: pointer;
-}
-.hamburger span { display: block; height: 2px; background: #fff; border-radius: 1px; transition: all .25s; }
-.hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
-.hamburger.open span:nth-child(2) { opacity: 0; }
-.hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+/* Hamburger removed — mobile-nav always visible */
+.hamburger { display: none !important; }
+.hamburger span, .hamburger.open span:nth-child(1), .hamburger.open span:nth-child(2), .hamburger.open span:nth-child(3) { display: none; }
 
 /* ── MOBILE NAV DRAWER ── */
 .mobile-nav {
   display: none; flex-direction: column;
   background: #223040; border-top: 1px solid rgba(255,255,255,.08);
-  max-height: 0; overflow: hidden; transition: max-height .3s ease;
+  overflow: hidden;
 }
-.mobile-nav.open { max-height: 320px; }
+/* Always open — no hamburger toggle needed */
+.mobile-nav.open { display: flex; max-height: none; }
 .mob-nav-btn {
   display: block; width: 100%; text-align: left;
   padding: 14px 1.25rem; background: transparent; border: none;
@@ -683,7 +677,11 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 @keyframes pulse { 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.3); } }
 
 .notif-panel {
-  position: fixed; top: auto; right: 1rem; width: 300px;
+  position: fixed;
+  top: auto;
+  right: 1rem;
+  width: min(320px, calc(100vw - 1.5rem));  /* никогда не шире экрана */
+  max-width: calc(100vw - 1.5rem);
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
   z-index: 700; display: none; overflow: hidden;

@@ -1894,10 +1894,6 @@ function initTabs() {
   document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       switchTab(btn.dataset.tab);
-      // Close mobile drawer
-      document.getElementById('mobileNav').classList.remove('open');
-      document.getElementById('hamburger').classList.remove('open');
-      document.getElementById('hamburger').setAttribute('aria-expanded', 'false');
     });
   });
 }
@@ -1992,13 +1988,9 @@ function init() {
     showWelcomeModal('picker');
   });
 
-  // ★ Hamburger
-  document.getElementById('hamburger').addEventListener('click', () => {
-    const nav  = document.getElementById('mobileNav');
-    const open = nav.classList.toggle('open');
-    document.getElementById('hamburger').classList.toggle('open', open);
-    document.getElementById('hamburger').setAttribute('aria-expanded', open);
-  });
+  // Mobile nav — always visible, no hamburger needed
+  const mobileNav = document.getElementById('mobileNav');
+  if (mobileNav) { mobileNav.classList.add('open'); mobileNav.removeAttribute('aria-hidden'); }
 
   // ★ Notification bell
   document.getElementById('notifBtn').addEventListener('click', e => {
@@ -2006,9 +1998,13 @@ function init() {
     const panel = document.getElementById('notifPanel');
     const btn   = e.currentTarget;
     const rect  = btn.getBoundingClientRect();
-    // Position panel below the bell button
+    const panelW = Math.min(320, window.innerWidth - 12);
+    // Позиционируем от правого края кнопки, но не выходим за левый край экрана
+    let rightPos = window.innerWidth - rect.right;
+    if (rect.right - panelW < 6) rightPos = window.innerWidth - panelW - 6;
     panel.style.top   = (rect.bottom + 8) + 'px';
-    panel.style.right = (window.innerWidth - rect.right) + 'px';
+    panel.style.right = rightPos + 'px';
+    panel.style.width = panelW + 'px';
     panel.classList.toggle('open');
   });
   document.addEventListener('click', e => {
@@ -2428,8 +2424,10 @@ async function saveLessonsBatch(key, lessons) {
 function subscribeRealtime() {
   if (!sb || sbChannel) return;
 
+  setSbStatus('connecting', 'Realtime: подключение…');
+
   sbChannel = sb
-    .channel('ag-realtime-v6')
+    .channel('ag-realtime-v7')
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'schedule' },
         onScheduleChange)
@@ -2439,15 +2437,36 @@ function subscribeRealtime() {
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'lessons' },
         onLessonsChange)
-    .subscribe(status => {
+    .subscribe((status, err) => {
       if (status === 'SUBSCRIBED') {
         setSbStatus('connected', 'подключено · Realtime ⚡');
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        setSbStatus('error', 'Realtime: ошибка канала');
-        setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000);
-      } else if (status === 'CLOSED') {
+
+      } else if (status === 'CHANNEL_ERROR') {
+        const cause = err?.message || 'неизвестная ошибка';
+        const hint  = cause.includes('fetch') || cause.includes('network')
+          ? ' (сеть заблокирована?)'
+          : cause.includes('401') || cause.includes('403')
+            ? ' (нет прав — проверьте ключ API)'
+            : '';
+        setSbStatus('error', `⚠️ Realtime: ошибка канала${hint} — повтор через 5с`);
+        console.warn('[SB Realtime] CHANNEL_ERROR:', cause);
         sbChannel = null;
-        setSbStatus('error', 'Realtime: канал закрыт');
+        setTimeout(subscribeRealtime, 5000);
+
+      } else if (status === 'TIMED_OUT') {
+        setSbStatus('error', '⚠️ Realtime: таймаут — повтор через 5с');
+        console.warn('[SB Realtime] TIMED_OUT');
+        sbChannel = null;
+        setTimeout(subscribeRealtime, 5000);
+
+      } else if (status === 'CLOSED') {
+        const cause = err?.message || '';
+        const hint  = cause ? ` (${cause})` : '';
+        setSbStatus('error', `⚠️ Realtime: канал закрыт${hint} — повтор через 8с`);
+        console.warn('[SB Realtime] CLOSED:', cause);
+        sbChannel = null;
+        // При CLOSED ждём чуть дольше — возможно временная блокировка сети
+        setTimeout(subscribeRealtime, 8000);
       }
     });
 }
