@@ -82,31 +82,28 @@ const State = {
   ],
 
   save() {
+    // localStorage — только кэш для offline. Supabase — источник правды.
+    // teachers и duties НЕ кэшируем — они всегда берутся из Supabase.
     try {
-      localStorage.setItem('ag_teachers',  JSON.stringify(this.teachers));
-      localStorage.setItem('ag_duties',    JSON.stringify(this.duties));
       localStorage.setItem('ag_replace',   JSON.stringify(this.replaceRequests));
       localStorage.setItem('ag_blackout',  JSON.stringify(this.blackoutDates));
       localStorage.setItem('ag_notifs',    JSON.stringify(this.notifications));
       localStorage.setItem('ag_lessons',   JSON.stringify(this.lessons));
-    } catch(e) { console.warn('LocalStorage save failed', e); }
+    } catch(e) { console.warn('Cache save failed', e); }
   },
 
   load() {
+    // Только то что нет в Supabase
     try {
-      const t = localStorage.getItem('ag_teachers');
-      const d = localStorage.getItem('ag_duties');
       const r = localStorage.getItem('ag_replace');
       const b = localStorage.getItem('ag_blackout');
       const n = localStorage.getItem('ag_notifs');
       const l = localStorage.getItem('ag_lessons');
-      if (t) this.teachers        = JSON.parse(t);
-      if (d) this.duties          = JSON.parse(d);
       if (r) this.replaceRequests = JSON.parse(r);
       if (b) this.blackoutDates   = JSON.parse(b);
       if (n) this.notifications   = JSON.parse(n);
       if (l) this.lessons         = JSON.parse(l);
-    } catch(e) { console.warn('Load failed', e); }
+    } catch(e) { console.warn('Cache load failed', e); }
   }
 };
 
@@ -1003,6 +1000,8 @@ function addPairEntry(key, pairN) {
   State.save();
   renderDayPanel(key);
   showToast('Преподаватель добавлен в пару', 'success');
+  // Синхронизируем с Supabase
+  saveLessonsBatch(key, State.lessons[key] || {});
 }
 
 function removePairEntry(key, pairN, idx) {
@@ -1010,6 +1009,7 @@ function removePairEntry(key, pairN, idx) {
   entries.splice(idx, 1);
   State.save();
   renderDayPanel(key);
+  saveLessonsBatch(key, State.lessons[key] || {});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2170,8 +2170,8 @@ async function initSupabase() {
   }
 
   if (!sdk || typeof sdk.createClient !== 'function') {
-    console.error('[SB] SDK не загружен после 5 секунд ожидания');
-    setSbStatus('error', 'SDK не загружен — проверьте сеть');
+    console.error('[SB] SDK не загружен после 5 секунд');
+    setSbStatus('error', '⚠️ SDK не загружен — проверьте интернет');
     return;
   }
 
@@ -2182,22 +2182,31 @@ async function initSupabase() {
       realtime: { params: { eventsPerSecond: 10 } },
     });
 
-    // Тестовый запрос для проверки соединения и правильности ключа
+    // Тестовый запрос с понятными сообщениями об ошибке
     const { data, error: pingErr } = await sb.from('teachers').select('id').limit(1);
     if (pingErr) {
-      throw new Error(`Ошибка доступа к таблице "teachers": ${pingErr.message} (code: ${pingErr.code})`);
+      const msg = pingErr.message.includes('fetch')
+        ? '⚠️ Нет доступа к серверу — проверьте интернет или VPN'
+        : `Ошибка БД: ${pingErr.message}`;
+      throw new Error(msg);
     }
 
     await loadTeachers();
     await loadSchedule();
+    await loadLessons();
 
     subscribeRealtime();
     setSbStatus('connected', 'подключено ✓');
     sbReady = true;
   } catch (err) {
-    console.error('[SB] Ошибка инициализации:', err);
-    setSbStatus('error', `ошибка: ${err.message}`);
+    const friendly = err.message.includes('fetch')
+      ? '⚠️ Нет соединения с сервером — работаем офлайн'
+      : `⚠️ ${err.message}`;
+    console.error('[SB] Ошибка:', err.message);
+    setSbStatus('error', friendly);
     sb = null;
+    // Авто-повтор через 15 секунд
+    setTimeout(initSupabase, 15000);
   }
 }
 
@@ -2359,27 +2368,100 @@ async function deleteScheduleMonth(year, month) {
 
 // ─── REALTIME ────────────────────────────────────────────────────────────────
 
+async function loadLessons() {
+  if (!sb) return;
+  const y = State.currentDate.getFullYear();
+  const m = State.currentDate.getMonth();
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+
+  const { data, error } = await sb
+    .from('lessons')
+    .select('date_key, pair_num, teacher_id, dept, room')
+    .like('date_key', prefix + '%');
+
+  if (error) { console.warn('[SB] loadLessons error:', error.message); return; }
+
+  // Очищаем текущий месяц и перестраиваем из БД
+  Object.keys(State.lessons).forEach(k => { if (k.startsWith(prefix)) delete State.lessons[k]; });
+
+  (data || []).forEach(r => {
+    if (!State.lessons[r.date_key]) State.lessons[r.date_key] = {};
+    const pn = r.pair_num;
+    if (!State.lessons[r.date_key][pn]) State.lessons[r.date_key][pn] = [];
+    State.lessons[r.date_key][pn].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '' });
+  });
+}
+
+async function saveLessonsBatch(key, lessons) {
+  if (!sb) return;
+  // Удаляем старые записи этого дня и вставляем новые
+  await sb.from('lessons').delete().eq('date_key', key);
+  const rows = [];
+  [1,2,3,4,5,6].forEach(pn => {
+    (lessons[pn] || []).forEach(e => {
+      rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '' });
+    });
+  });
+  if (rows.length > 0) {
+    const { error } = await sb.from('lessons').insert(rows);
+    if (error) console.warn('[SB] saveLessonsBatch error:', error.message);
+  }
+}
+
 function subscribeRealtime() {
   if (!sb || sbChannel) return;
 
   sbChannel = sb
-    .channel('ag-realtime-v5')
+    .channel('ag-realtime-v6')
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'schedule' },
         onScheduleChange)
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'teachers' },
         onTeacherChange)
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'lessons' },
+        onLessonsChange)
     .subscribe(status => {
       if (status === 'SUBSCRIBED') {
         setSbStatus('connected', 'подключено · Realtime ⚡');
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         setSbStatus('error', 'Realtime: ошибка канала');
+        setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000);
       } else if (status === 'CLOSED') {
-        sbChannel = null;   // разрешаем переподключение
+        sbChannel = null;
         setSbStatus('error', 'Realtime: канал закрыт');
       }
     });
+}
+
+function onLessonsChange({ eventType, new: row, old: oldRow }) {
+  const key = row?.date_key ?? oldRow?.date_key;
+  if (!key) return;
+
+  if (eventType === 'DELETE') {
+    // Reload entire day from DB after delete
+    if (sb) {
+      sb.from('lessons').select('pair_num, teacher_id, dept, room').eq('date_key', key)
+        .then(({ data }) => {
+          State.lessons[key] = {};
+          (data || []).forEach(r => {
+            if (!State.lessons[key][r.pair_num]) State.lessons[key][r.pair_num] = [];
+            State.lessons[key][r.pair_num].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '' });
+          });
+          if (State.activeDayKey === key) renderDayPanel(key);
+        });
+    }
+  } else {
+    const pn = row.pair_num;
+    if (!State.lessons[key]) State.lessons[key] = {};
+    if (!State.lessons[key][pn]) State.lessons[key][pn] = [];
+    // Add if not already present
+    const exists = State.lessons[key][pn].some(e => e.tid === row.teacher_id && e.room === row.room);
+    if (!exists) State.lessons[key][pn].push({ tid: row.teacher_id, dept: row.dept || '', room: row.room || '' });
+    if (State.activeDayKey === key) renderDayPanel(key);
+  }
+  renderCalendar();
 }
 
 // ── Обработчики входящих Realtime событий ────────────────────────────────────
@@ -2496,8 +2578,10 @@ window.autoDistribute = async function () {
   _autoDistribute();
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
-  await deleteScheduleMonth(y, m);
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
+
+  // Сохраняем дежурных
+  await deleteScheduleMonth(y, m);
   const rows = [];
   Object.entries(State.duties)
     .filter(([k]) => k.startsWith(prefix))
@@ -2505,10 +2589,30 @@ window.autoDistribute = async function () {
       const entries = Array.isArray(v) ? v : [v];
       entries.forEach(e => {
         const { tid, dept } = normEntry(e);
-        rows.push({ date_key: k, teacher_id: tid, dept: dept || null, replace_request: false });
+        rows.push({ date_key: k, teacher_id: tid, dept: dept || '', replace_request: false });
       });
     });
   await saveScheduleBatch(rows);
+
+  // Сохраняем пары в Supabase lessons
+  if (sb) {
+    await sb.from('lessons').delete().like('date_key', prefix + '%');
+    const lessonRows = [];
+    Object.keys(State.lessons).filter(k => k.startsWith(prefix)).forEach(k => {
+      [1,2,3,4,5,6].forEach(pn => {
+        (State.lessons[k]?.[pn] || []).forEach(e => {
+          lessonRows.push({ date_key: k, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '' });
+        });
+      });
+    });
+    if (lessonRows.length > 0) {
+      const chunkSize = 500;
+      for (let i = 0; i < lessonRows.length; i += chunkSize) {
+        const { error } = await sb.from('lessons').insert(lessonRows.slice(i, i + chunkSize));
+        if (error) console.warn('[SB] lessons batch error:', error.message);
+      }
+    }
+  }
 };
 
 // ── Очистка расписания ──
@@ -2516,8 +2620,10 @@ const _clearAll = clearAll;
 window.clearAll = async function () {
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
+  const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
   _clearAll();
   await deleteScheduleMonth(y, m);
+  if (sb) await sb.from('lessons').delete().like('date_key', prefix + '%');
 };
 
 // ── Добавление через инлайн-форму ──
