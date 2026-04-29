@@ -621,8 +621,13 @@ function renderAccordion() {
           const deptLabel = entry.dept || teacher.dept || '';
           const replaceBadge = (isReplace && isMyDutyHere)
             ? '<div style="font-size:.68rem;color:var(--orange);margin-top:3px">🔄 Просит замену</div>' : '';
+          // Кнопка удаления — только для admin, только на мобиле (через CSS класс)
+          const removeBtn = State.currentRole === 'admin'
+            ? `<button class="acc-remove-duty mob-only" data-remove-tid="${entry.tid}" data-remove-dept="${entry.dept||''}" data-remove-key="${key}" title="Убрать дежурного">✕</button>`
+            : '';
           return `<div class="acc-duty-chip${isReplace && isMyDutyHere ? ' replace' : ''}"
-               style="border-left-color:${color};background:${isReplace && isMyDutyHere ? '' : color + '12'};border-color:${isReplace && isMyDutyHere ? '' : color + '40'};margin-bottom:4px">
+               style="border-left-color:${color};background:${isReplace && isMyDutyHere ? '' : color + '12'};border-color:${isReplace && isMyDutyHere ? '' : color + '40'};margin-bottom:4px;position:relative">
+            ${removeBtn}
             <div class="acc-duty-name">${teacher.name}</div>
             <div class="acc-duty-dept">${deptLabel}</div>
             ${teacher.phone ? `<div class="acc-duty-dept">${teacher.phone}</div>` : ''}
@@ -670,6 +675,25 @@ function renderAccordion() {
           }
         });
       }
+
+      // Кнопки удаления дежурного (мобильная версия)
+      row.querySelectorAll('.acc-remove-duty').forEach(rb => {
+        rb.addEventListener('click', e => {
+          e.stopPropagation();
+          const k    = rb.dataset.removeKey;
+          const rtid = rb.dataset.removeTid;
+          const rdept = rb.dataset.removeDept || null;
+          removeDuty(k, rtid, rdept);
+          State.save();
+          renderCalendar();
+          renderAccordion();
+          renderTeachersList();
+          renderStats();
+          showToast('Дежурный снят', 'info');
+          // Supabase sync
+          if (typeof saveScheduleRemoveOne === 'function') saveScheduleRemoveOne(k, rtid);
+        });
+      });
 
       body.appendChild(row);
     });
@@ -1894,6 +1918,10 @@ function initTabs() {
   document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       switchTab(btn.dataset.tab);
+      // Close mobile drawer
+      document.getElementById('mobileNav').classList.remove('open');
+      document.getElementById('hamburger').classList.remove('open');
+      document.getElementById('hamburger').setAttribute('aria-expanded', 'false');
     });
   });
 }
@@ -1988,9 +2016,13 @@ function init() {
     showWelcomeModal('picker');
   });
 
-  // Mobile nav — always visible, no hamburger needed
-  const mobileNav = document.getElementById('mobileNav');
-  if (mobileNav) { mobileNav.classList.add('open'); mobileNav.removeAttribute('aria-hidden'); }
+  // ★ Hamburger
+  document.getElementById('hamburger').addEventListener('click', () => {
+    const nav  = document.getElementById('mobileNav');
+    const open = nav.classList.toggle('open');
+    document.getElementById('hamburger').classList.toggle('open', open);
+    document.getElementById('hamburger').setAttribute('aria-expanded', open);
+  });
 
   // ★ Notification bell
   document.getElementById('notifBtn').addEventListener('click', e => {
@@ -1998,13 +2030,9 @@ function init() {
     const panel = document.getElementById('notifPanel');
     const btn   = e.currentTarget;
     const rect  = btn.getBoundingClientRect();
-    const panelW = Math.min(320, window.innerWidth - 12);
-    // Позиционируем от правого края кнопки, но не выходим за левый край экрана
-    let rightPos = window.innerWidth - rect.right;
-    if (rect.right - panelW < 6) rightPos = window.innerWidth - panelW - 6;
+    // Position panel below the bell button
     panel.style.top   = (rect.bottom + 8) + 'px';
-    panel.style.right = rightPos + 'px';
-    panel.style.width = panelW + 'px';
+    panel.style.right = (window.innerWidth - rect.right) + 'px';
     panel.classList.toggle('open');
   });
   document.addEventListener('click', e => {
@@ -2424,10 +2452,8 @@ async function saveLessonsBatch(key, lessons) {
 function subscribeRealtime() {
   if (!sb || sbChannel) return;
 
-  setSbStatus('connecting', 'Realtime: подключение…');
-
   sbChannel = sb
-    .channel('ag-realtime-v7')
+    .channel('ag-realtime-v6')
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'schedule' },
         onScheduleChange)
@@ -2437,36 +2463,15 @@ function subscribeRealtime() {
     .on('postgres_changes',
         { event: '*', schema: 'public', table: 'lessons' },
         onLessonsChange)
-    .subscribe((status, err) => {
+    .subscribe(status => {
       if (status === 'SUBSCRIBED') {
         setSbStatus('connected', 'подключено · Realtime ⚡');
-
-      } else if (status === 'CHANNEL_ERROR') {
-        const cause = err?.message || 'неизвестная ошибка';
-        const hint  = cause.includes('fetch') || cause.includes('network')
-          ? ' (сеть заблокирована?)'
-          : cause.includes('401') || cause.includes('403')
-            ? ' (нет прав — проверьте ключ API)'
-            : '';
-        setSbStatus('error', `⚠️ Realtime: ошибка канала${hint} — повтор через 5с`);
-        console.warn('[SB Realtime] CHANNEL_ERROR:', cause);
-        sbChannel = null;
-        setTimeout(subscribeRealtime, 5000);
-
-      } else if (status === 'TIMED_OUT') {
-        setSbStatus('error', '⚠️ Realtime: таймаут — повтор через 5с');
-        console.warn('[SB Realtime] TIMED_OUT');
-        sbChannel = null;
-        setTimeout(subscribeRealtime, 5000);
-
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        setSbStatus('error', 'Realtime: ошибка канала');
+        setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000);
       } else if (status === 'CLOSED') {
-        const cause = err?.message || '';
-        const hint  = cause ? ` (${cause})` : '';
-        setSbStatus('error', `⚠️ Realtime: канал закрыт${hint} — повтор через 8с`);
-        console.warn('[SB Realtime] CLOSED:', cause);
         sbChannel = null;
-        // При CLOSED ждём чуть дольше — возможно временная блокировка сети
-        setTimeout(subscribeRealtime, 8000);
+        setSbStatus('error', 'Realtime: канал закрыт');
       }
     });
 }
