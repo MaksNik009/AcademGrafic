@@ -818,6 +818,10 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 @media (max-width: 760px) {
   .desktop-cal { display: none !important; }
   .cal-accordion { display: flex !important; }
+  /* Убираем гамбургер — навигация всегда видна строками */
+  .hamburger { display: none !important; }
+  /* Мобильная навигация — всегда показана, без drawer */
+  .mobile-nav { display: flex !important; max-height: none !important; overflow: visible; }
   .app-main { padding: 1rem; }
   .month-title { font-size: 1.3rem; min-width: auto; }
 }

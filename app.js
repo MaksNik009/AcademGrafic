@@ -2016,12 +2016,23 @@ function init() {
     showWelcomeModal('picker');
   });
 
-  // ★ Hamburger
+  // ★ Hamburger (desktop drawer — не трогаем для ПК)
   document.getElementById('hamburger').addEventListener('click', () => {
     const nav  = document.getElementById('mobileNav');
     const open = nav.classList.toggle('open');
     document.getElementById('hamburger').classList.toggle('open', open);
     document.getElementById('hamburger').setAttribute('aria-expanded', open);
+  });
+
+  // На мобиле (≤760px) навигация всегда открыта — убираем drawer-поведение
+  if (window.innerWidth <= 760) {
+    const mNav = document.getElementById('mobileNav');
+    if (mNav) mNav.classList.add('open');
+  }
+  window.addEventListener('resize', () => {
+    const mNav = document.getElementById('mobileNav');
+    if (!mNav) return;
+    if (window.innerWidth <= 760) mNav.classList.add('open');
   });
 
   // ★ Notification bell
