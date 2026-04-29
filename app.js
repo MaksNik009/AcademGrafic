@@ -1115,8 +1115,21 @@ function _buildWelcomePage(page) {
 function _wireWelcomePage(page) {
   if (page === 'choose') {
     document.getElementById('wmChooseAdmin')?.addEventListener('click', () => showWelcomeModal('login'));
-    document.getElementById('wmChooseTeacher')?.addEventListener('click', () => {
-      if (State.teachers.length === 0) { showToast('Преподаватели ещё не добавлены', 'error'); return; }
+    document.getElementById('wmChooseTeacher')?.addEventListener('click', async () => {
+      // Если учителя ещё грузятся — ждём до 3 сек
+      if (State.teachers.length === 0 && sb) {
+        const btn = document.getElementById('wmChooseTeacher');
+        if (btn) btn.style.opacity = '0.6';
+        for (let i = 0; i < 30; i++) {
+          await new Promise(r => setTimeout(r, 100));
+          if (State.teachers.length > 0) break;
+        }
+        if (btn) btn.style.opacity = '';
+      }
+      if (State.teachers.length === 0) {
+        showToast('Преподаватели ещё не добавлены в систему', 'error');
+        return;
+      }
       showWelcomeModal('picker');
     });
   }
@@ -1896,13 +1909,17 @@ function init() {
   initTabs();
 
   // Month navigation
-  document.getElementById('prevMonth').addEventListener('click', () => {
+  document.getElementById('prevMonth').addEventListener('click', async () => {
     State.currentDate.setMonth(State.currentDate.getMonth() - 1);
+    closeDayPanel();
     renderCalendar(); renderAccordion();
+    if (sb) { await loadSchedule(); await loadLessons(); renderCalendar(); renderAccordion(); }
   });
-  document.getElementById('nextMonth').addEventListener('click', () => {
+  document.getElementById('nextMonth').addEventListener('click', async () => {
     State.currentDate.setMonth(State.currentDate.getMonth() + 1);
+    closeDayPanel();
     renderCalendar(); renderAccordion();
+    if (sb) { await loadSchedule(); await loadLessons(); renderCalendar(); renderAccordion(); }
   });
 
   // Assignment modal close
