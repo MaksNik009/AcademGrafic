@@ -2038,12 +2038,25 @@ function init() {
   // ★ Notification bell
   document.getElementById('notifBtn').addEventListener('click', e => {
     e.stopPropagation();
-    const panel = document.getElementById('notifPanel');
-    const btn   = e.currentTarget;
-    const rect  = btn.getBoundingClientRect();
-    // Position panel below the bell button
-    panel.style.top   = (rect.bottom + 8) + 'px';
-    panel.style.right = (window.innerWidth - rect.right) + 'px';
+    const panel  = document.getElementById('notifPanel');
+    const btn    = e.currentTarget;
+    const rect   = btn.getBoundingClientRect();
+    const isMob  = window.innerWidth <= 760;
+
+    if (isMob) {
+      // На мобиле: панель прибита к левому краю с отступом, ширина = экран минус поля
+      const pw = Math.min(300, window.innerWidth - 16);
+      panel.style.width = pw + 'px';
+      panel.style.top   = (rect.bottom + 8) + 'px';
+      panel.style.right = 'auto';
+      panel.style.left  = '8px';
+    } else {
+      // На ПК: позиционируем под кнопкой справа (старое поведение)
+      panel.style.width = '';
+      panel.style.left  = '';
+      panel.style.top   = (rect.bottom + 8) + 'px';
+      panel.style.right = (window.innerWidth - rect.right) + 'px';
+    }
     panel.classList.toggle('open');
   });
   document.addEventListener('click', e => {
