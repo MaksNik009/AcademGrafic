@@ -2501,6 +2501,7 @@ function subscribeRealtime() {
 }
 
 function onLessonsChange({ eventType, new: row, old: oldRow }) {
+  if (_suppressRealtimeRender) return;  // игнорируем наши же события при пакетной записи
   const key = row?.date_key ?? oldRow?.date_key;
   if (!key) return;
 
@@ -2531,7 +2532,11 @@ function onLessonsChange({ eventType, new: row, old: oldRow }) {
 
 // ── Обработчики входящих Realtime событий ────────────────────────────────────
 
+// Флаг подавления Realtime-перерисовки во время пакетной записи
+let _suppressRealtimeRender = false;
+
 function onScheduleChange({ eventType, new: row, old: oldRow }) {
+  if (_suppressRealtimeRender) return;  // игнорируем наши же события
   const key = row?.date_key ?? oldRow?.date_key;
   if (!key) return;
 
@@ -2640,44 +2645,58 @@ window.toggleReplaceRequest = async function (key) {
 // ── Авто-распределение (пакетная запись) ──
 const _autoDistribute = autoDistribute;
 window.autoDistribute = async function () {
+  // Локально всё уже заполнено — рендерим сразу
   _autoDistribute();
+
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
 
-  // Сохраняем дежурных
-  await deleteScheduleMonth(y, m);
-  const rows = [];
-  Object.entries(State.duties)
-    .filter(([k]) => k.startsWith(prefix))
-    .forEach(([k, v]) => {
-      const entries = Array.isArray(v) ? v : [v];
-      entries.forEach(e => {
-        const { tid, dept } = normEntry(e);
-        rows.push({ date_key: k, teacher_id: tid, dept: dept || '', replace_request: false });
-      });
-    });
-  await saveScheduleBatch(rows);
+  // Подавляем Realtime-события пока сами пишем пакет
+  _suppressRealtimeRender = true;
 
-  // Сохраняем пары в Supabase lessons
-  if (sb) {
-    await sb.from('lessons').delete().like('date_key', prefix + '%');
-    const lessonRows = [];
-    Object.keys(State.lessons).filter(k => k.startsWith(prefix)).forEach(k => {
-      [1,2,3,4,5,6].forEach(pn => {
-        (State.lessons[k]?.[pn] || []).forEach(e => {
-          lessonRows.push({ date_key: k, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '' });
+  try {
+    // Сохраняем дежурных
+    await deleteScheduleMonth(y, m);
+    const rows = [];
+    Object.entries(State.duties)
+      .filter(([k]) => k.startsWith(prefix))
+      .forEach(([k, v]) => {
+        const entries = Array.isArray(v) ? v : [v];
+        entries.forEach(e => {
+          const { tid, dept } = normEntry(e);
+          rows.push({ date_key: k, teacher_id: tid, dept: dept || '', replace_request: false });
         });
       });
-    });
-    if (lessonRows.length > 0) {
+    await saveScheduleBatch(rows);
+
+    // Сохраняем пары
+    if (sb) {
+      await sb.from('lessons').delete().like('date_key', prefix + '%');
+      const lessonRows = [];
+      Object.keys(State.lessons).filter(k => k.startsWith(prefix)).forEach(k => {
+        [1,2,3,4,5,6].forEach(pn => {
+          (State.lessons[k]?.[pn] || []).forEach(e => {
+            lessonRows.push({ date_key: k, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '' });
+          });
+        });
+      });
       const chunkSize = 500;
       for (let i = 0; i < lessonRows.length; i += chunkSize) {
         const { error } = await sb.from('lessons').insert(lessonRows.slice(i, i + chunkSize));
         if (error) console.warn('[SB] lessons batch error:', error.message);
       }
     }
+  } finally {
+    // Снимаем подавление и делаем один финальный рендер
+    setTimeout(() => {
+      _suppressRealtimeRender = false;
+      renderCalendar();
+      renderAccordion();
+    }, 500);
   }
+
+  showToast('Авто-распределение сохранено в облако ✓', 'success');
 };
 
 // ── Очистка расписания ──
