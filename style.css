@@ -1541,3 +1541,129 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
     padding-right: 26px; /* чтобы имя не залезало под крестик */
   }
 }
+
+/* ══════════════════════════════════════════════════
+   ★ CALENDAR CELL — duty chip (avatar + full name)
+   ══════════════════════════════════════════════════ */
+.cell-duty-chip {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 4px;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.cell-duty-avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .56rem; font-weight: 700; color: #fff;
+  flex-shrink: 0; cursor: pointer;
+  transition: transform .15s;
+}
+.cell-duty-avatar:hover { transform: scale(1.12); }
+.cell-duty-name {
+  font-size: .72rem; font-weight: 600;
+  color: var(--navy); line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 1; min-width: 0;
+}
+.cell-duty-more {
+  font-size: .65rem; color: var(--blue);
+  font-family: var(--font-mono); font-weight: 600;
+  padding: 1px 5px; background: var(--blue-light);
+  border-radius: 10px; margin-top: 2px;
+}
+
+/* ══════════════════════════════════════════════════
+   ★ TEACHER MODE CELL STRIPS
+   ══════════════════════════════════════════════════ */
+.cell-strips {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  display: flex; flex-direction: row;
+  width: 6px;
+}
+.cell-strip { width: 3px; height: 100%; }
+.cell-strip--lesson { background: rgba(74,144,217,0.3); }
+.cell-strip--duty   { background: var(--blue); }
+
+.cell--teacher-active { background: rgba(74,144,217,0.06) !important; }
+.cell--teacher-duty   {
+  background: rgba(74,144,217,0.14) !important;
+  box-shadow: inset 0 0 0 1px rgba(74,144,217,0.35);
+}
+.day-cell { position: relative; overflow: hidden; }
+
+/* ══════════════════════════════════════════════════
+   ★ TEACHER PICKER — grid + search
+   ══════════════════════════════════════════════════ */
+.wm-teacher-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  max-height: 52vh; overflow-y: auto;
+  padding-right: 2px;
+}
+.wm-teacher-card {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 10px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius); cursor: pointer;
+  text-align: center;
+  transition: background .14s, border-color .14s, transform .12s;
+}
+.wm-teacher-card:hover {
+  background: var(--blue-light); border-color: var(--blue);
+  transform: translateY(-2px);
+}
+.wm-teacher-card-name {
+  font-size: .78rem; font-weight: 600; color: var(--navy);
+  line-height: 1.3; word-break: break-word;
+}
+
+/* ══════════════════════════════════════════════════
+   ★ BUILDING COLUMNS in teachers tab
+   ══════════════════════════════════════════════════ */
+.building-columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.building-col {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.building-col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--navy);
+  color: rgba(255,255,255,.9);
+}
+.building-col-label {
+  font-size: .82rem; font-weight: 700;
+  font-family: var(--font-display);
+}
+.building-col-count {
+  font-size: .7rem; font-family: var(--font-mono);
+  background: rgba(255,255,255,.15);
+  padding: 1px 7px; border-radius: 10px;
+}
+.building-col-list { display: flex; flex-direction: column; gap: 0; }
+.building-col-list .teacher-card {
+  border-radius: 0;
+  border-left: none; border-right: none; border-top: none;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+}
+.building-col-list .teacher-card:last-child { border-bottom: none; }
+
+@media (max-width: 900px) {
+  .building-columns { grid-template-columns: 1fr; }
+}
+
+/* ══════════════════════════════════════════════════
+   ★ WELCOME MODAL wider for teacher grid
+   ══════════════════════════════════════════════════ */
+.wm-card.wm-card--wide { max-width: 560px; }

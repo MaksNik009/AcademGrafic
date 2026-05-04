@@ -63,17 +63,18 @@ function isHoliday(dateOrKey) {
 const State = {
   teachers: [],
   duties: {},
-  replaceRequests: {},    // { "YYYY-MM-DD": true }
-  blackoutDates: {},      // { teacherId: ["YYYY-MM-DD", …] }
-  notifications: [],      // [{ id, msg, icon, time }]
-  lessons: {},            // { "YYYY-MM-DD": { "1":[{tid,dept,room}], ..., "6":[...] } }
-  currentRole: 'admin',   // 'admin' | 'teacher'
+  replaceRequests: {},
+  blackoutDates: {},
+  notifications: [],
+  lessons: {},
+  currentRole: 'admin',
   currentTeacherId: null,
   currentDate: new Date(),
   selectedCell: null,
   selectedTeacherId: null,
   modalMode: 'assign',
-  activeDayKey: null,     // открытая боковая панель
+  activeDayKey: null,
+  activeBuilding: 'all',   // 'all' | '1' | '2' | '3'
 
   avatarColors: [
     '#2C6FAC','#1A7A4A','#8E44AD','#C0392B',
@@ -417,54 +418,91 @@ function renderCalendar() {
       cell.appendChild(bi);
     }
 
-    // ── Compact avatar grid (no text) ─────────────────────────────────
-    // Собираем ВСЕХ: дежурные + преподаватели из пар (без дублей по tid)
+    // ── Cell content ────────────────────────────────────────────────────
     const dutyEntries = getDutyEntries(key);
-    const seenTids = new Set();
-    const allCellEntries = [];
 
-    // 1. Сначала дежурные (они идут первыми)
-    dutyEntries.forEach(e => {
-      if (!seenTids.has(e.tid)) { seenTids.add(e.tid); allCellEntries.push({ tid: e.tid, dept: e.dept, isDuty: true }); }
-    });
+    // Building filter: show only teachers from selected building
+    const bFilter = State.activeBuilding;
+    const visibleDutyEntries = bFilter === 'all'
+      ? dutyEntries
+      : dutyEntries.filter(e => { const t = teacherById(e.tid); return t && (t.building || '1') === bFilter; });
 
-    // 2. Затем преподаватели из пар этого дня
+    // Teachers from pairs for this day (building-filtered)
+    const pairTeacherIds = new Set();
     if (State.lessons[key]) {
       [1,2,3,4,5,6].forEach(pn => {
         (State.lessons[key][pn] || []).forEach(e => {
-          if (!seenTids.has(e.tid)) { seenTids.add(e.tid); allCellEntries.push({ tid: e.tid, dept: e.dept, isDuty: false }); }
+          const t = teacherById(e.tid);
+          if (t && (bFilter === 'all' || (t.building || '1') === bFilter)) pairTeacherIds.add(e.tid);
         });
       });
     }
 
-    if (!isHoliday && allCellEntries.length > 0) {
-      const avatarGrid = document.createElement('div');
-      avatarGrid.className = 'cell-avatar-grid';
-      allCellEntries.forEach(entry => {
-        const teacher = teacherById(entry.tid);
-        if (!teacher) return;
-        const color = getColor(teacherIndex(entry.tid));
-        const av = document.createElement('div');
-        av.className = 'cell-avatar';
-        av.style.background = color;
-        av.textContent = initials(teacher.name);
-        av.title = teacher.name + (entry.dept ? ' · ' + entry.dept : '') + (entry.isDuty ? ' ⭐' : '');
-        av.style.cursor = 'pointer';
-        av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
-        avatarGrid.appendChild(av);
-      });
-      cell.appendChild(avatarGrid);
-      // Show fade only when avatars actually overflow the cell
-      requestAnimationFrame(() => {
-        if (avatarGrid.scrollHeight > avatarGrid.clientHeight + 1) {
-          avatarGrid.classList.add('has-overflow');
+    if (!isHoliday) {
+      if (State.currentRole === 'teacher') {
+        // ── Teacher mode: side strips ────────────────────────────────
+        const tid = State.currentTeacherId;
+        const hasLesson = pairTeacherIds.has(tid);
+        const isDuty    = getDutyIds(key).includes(tid);
+
+        if (hasLesson || isDuty) {
+          cell.classList.add('cell--teacher-active');
+          if (isDuty) cell.classList.add('cell--teacher-duty');
+
+          const stripWrap = document.createElement('div');
+          stripWrap.className = 'cell-strips';
+          if (hasLesson) {
+            const s1 = document.createElement('div');
+            s1.className = 'cell-strip cell-strip--lesson';
+            stripWrap.appendChild(s1);
+          }
+          if (isDuty) {
+            const s2 = document.createElement('div');
+            s2.className = 'cell-strip cell-strip--duty';
+            stripWrap.appendChild(s2);
+          }
+          cell.appendChild(stripWrap);
         }
-      });
-    } else if (!isHoliday && State.currentRole === 'admin') {
-      const hint = document.createElement('div');
-      hint.className = 'add-hint';
-      hint.textContent = '+';
-      cell.appendChild(hint);
+      } else {
+        // ── Admin mode: duty teacher avatar + full name ──────────────
+        if (visibleDutyEntries.length > 0) {
+          const entry   = visibleDutyEntries[0];
+          const teacher = teacherById(entry.tid);
+          if (teacher) {
+            const color = getColor(teacherIndex(entry.tid));
+            const chip  = document.createElement('div');
+            chip.className = 'cell-duty-chip';
+
+            const av = document.createElement('div');
+            av.className = 'cell-duty-avatar';
+            av.style.background = color;
+            av.textContent = initials(teacher.name);
+            av.title = teacher.name;
+            av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(entry.tid); });
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'cell-duty-name';
+            nameEl.textContent = teacher.name;
+
+            chip.appendChild(av);
+            chip.appendChild(nameEl);
+            cell.appendChild(chip);
+
+            // Extra duty teachers (if more than 1)
+            if (visibleDutyEntries.length > 1) {
+              const more = document.createElement('div');
+              more.className = 'cell-duty-more';
+              more.textContent = `+${visibleDutyEntries.length - 1}`;
+              cell.appendChild(more);
+            }
+          }
+        } else if (State.currentRole === 'admin') {
+          const hint = document.createElement('div');
+          hint.className = 'add-hint';
+          hint.textContent = '+';
+          cell.appendChild(hint);
+        }
+      }
     }
 
     if (!isHoliday) {
@@ -935,10 +973,10 @@ function renderDayPanel(key) {
   const pairsEl = panel.querySelector('.day-panel-pairs');
   pairsEl.innerHTML = PAIRS.map(p => {
     const entries = getPairEntries(key, p.n);
-    const entriesHtml = entries.length
-      ? entries.map((e, i) => {
+    const validEntries = entries.filter(e => !!teacherById(e.tid));
+    const entriesHtml = validEntries.length
+      ? validEntries.map((e, i) => {
           const t = teacherById(e.tid);
-          if (!t) return '';
           const color = getColor(teacherIndex(e.tid));
           return `<div class="pair-teacher-row">
             <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">${initials(t.name)}</div>
@@ -951,11 +989,11 @@ function renderDayPanel(key) {
         }).join('')
       : `<div style="font-size:.75rem;color:var(--text-faint);font-style:italic;padding:4px 0">— свободно —</div>`;
 
-    return `<details class="pair-block" ${entries.length ? 'open' : ''}>
+    return `<details class="pair-block" ${validEntries.length ? 'open' : ''}>
       <summary class="pair-summary">
         <span class="pair-num">Пара ${p.n}</span>
         <span class="pair-time">${p.time}</span>
-        <span class="pair-count">${entries.length > 0 ? entries.length + ' преп.' : ''}</span>
+        <span class="pair-count">${validEntries.length > 0 ? validEntries.length + ' преп.' : ''}</span>
         <span class="pair-chevron">▾</span>
       </summary>
       <div class="pair-body">
@@ -1054,6 +1092,13 @@ function showWelcomeModal(page) {
   const content = document.getElementById('welcomeModalContent');
   if (!overlay || !content) return;
 
+  // Wider card for teacher grid picker
+  if (page === 'picker') {
+    content.classList.add('wm-card--wide');
+  } else {
+    content.classList.remove('wm-card--wide');
+  }
+
   content.innerHTML = _buildWelcomePage(page);
   overlay.classList.add('open');
   _wireWelcomePage(page);
@@ -1115,23 +1160,52 @@ function _buildWelcomePage(page) {
   }
 
   if (page === 'picker') {
-    const rows = State.teachers.map(t => {
+    const buildRows = (filter = '') => State.teachers.map(t => {
       const color = getColor(teacherIndex(t.id));
-      return `<button class="wm-teacher-row" data-tid="${t.id}">
-        <div class="wm-teacher-av" style="background:${color}">${initials(t.name)}</div>
-        <div>
-          <div class="wm-teacher-name">${t.name}</div>
-          <div class="wm-teacher-dept">${t.dept || ''}</div>
-        </div>
+      const norm  = filter.toLowerCase();
+      const nameLower = t.name.toLowerCase();
+      if (norm && !nameLower.includes(norm)) return '';
+      // Highlight matching letters
+      let displayName = t.name;
+      if (norm) {
+        const idx = nameLower.indexOf(norm);
+        displayName = t.name.slice(0, idx)
+          + `<mark style="background:#FFF176;border-radius:2px;padding:0 1px">${t.name.slice(idx, idx + norm.length)}</mark>`
+          + t.name.slice(idx + norm.length);
+      }
+      return `<button class="wm-teacher-card" data-tid="${t.id}">
+        <div class="wm-teacher-av" style="background:${color};width:44px;height:44px;font-size:.85rem">${initials(t.name)}</div>
+        <div class="wm-teacher-card-name">${displayName}</div>
+        <div class="wm-teacher-dept" style="font-size:.65rem">${t.dept || ''}</div>
       </button>`;
     }).join('');
+
     return `
       <button class="wm-back" id="wmBack" title="Назад">←</button>
-      <div style="text-align:center;margin-bottom:1rem">
-        <div style="font-size:2.2rem;margin-bottom:.4rem">👤</div>
-        <h2 class="wm-title" style="margin-bottom:0">Выберите преподавателя</h2>
+      <h2 class="wm-title" style="margin-bottom:.5rem">Выберите преподавателя</h2>
+      <input class="field-input" id="wmTeacherSearch" placeholder="🔍 Поиск по имени или фамилии…"
+        style="margin-bottom:.75rem;font-size:.9rem" autocomplete="off"/>
+      <div class="wm-teacher-grid" id="wmTeacherGrid">${buildRows()}</div>`;
+  }
+
+  if (page === 'teacher-login') {
+    const tid = State._pendingTeacherId;
+    const t   = teacherById(tid);
+    const color = t ? getColor(teacherIndex(tid)) : '#4A90D9';
+    return `
+      <button class="wm-back" id="wmBack" title="Назад">←</button>
+      <div style="text-align:center;margin-bottom:1.25rem">
+        ${t ? `<div style="width:60px;height:60px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:#fff;margin:0 auto .75rem">${initials(t.name)}</div>` : ''}
+        <h2 class="wm-title" style="margin-bottom:.25rem">${t ? t.name : 'Преподаватель'}</h2>
+        <p class="wm-hint">Введите пароль для входа</p>
       </div>
-      <div class="wm-teacher-list">${rows}</div>`;
+      <div style="display:flex;flex-direction:column;gap:.75rem">
+        <input class="field-input" type="password" id="tAuthPassword" placeholder="Пароль" autocomplete="current-password" style="font-size:1rem"/>
+        <div style="display:flex;align-items:center;gap:.75rem">
+          <button class="btn-modal-save" id="tAuthSubmit" style="flex:1;padding:.7rem">Войти</button>
+          <span id="tAuthStatus" style="font-size:1.4rem;width:28px;text-align:center;flex-shrink:0"></span>
+        </div>
+      </div>`;
   }
   return '';
 }
@@ -1140,7 +1214,6 @@ function _wireWelcomePage(page) {
   if (page === 'choose') {
     document.getElementById('wmChooseAdmin')?.addEventListener('click', () => showWelcomeModal('login'));
     document.getElementById('wmChooseTeacher')?.addEventListener('click', async () => {
-      // Если учителя ещё грузятся — ждём до 3 сек
       if (State.teachers.length === 0 && sb) {
         const btn = document.getElementById('wmChooseTeacher');
         if (btn) btn.style.opacity = '0.6';
@@ -1150,10 +1223,7 @@ function _wireWelcomePage(page) {
         }
         if (btn) btn.style.opacity = '';
       }
-      if (State.teachers.length === 0) {
-        showToast('Преподаватели ещё не добавлены в систему', 'error');
-        return;
-      }
+      if (State.teachers.length === 0) { showToast('Преподаватели ещё не добавлены в систему', 'error'); return; }
       showWelcomeModal('picker');
     });
   }
@@ -1161,8 +1231,8 @@ function _wireWelcomePage(page) {
   if (page === 'login') {
     document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const doLogin = () => {
-      const login = (document.getElementById('authLogin')?.value || '').trim();
-      const pass  = (document.getElementById('authPassword')?.value || '').trim();
+      const login  = (document.getElementById('authLogin')?.value || '').trim();
+      const pass   = (document.getElementById('authPassword')?.value || '').trim();
       const status = document.getElementById('authStatus');
       if (login === ADMIN_LOGIN && pass === ADMIN_PASSWORD) {
         if (status) status.textContent = '✅';
@@ -1181,13 +1251,69 @@ function _wireWelcomePage(page) {
 
   if (page === 'picker') {
     document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
-    document.querySelectorAll('.wm-teacher-row').forEach(btn => {
-      btn.addEventListener('click', () => {
-        State.currentTeacherId = btn.dataset.tid;
-        hideWelcomeModal();
-        applyRole('teacher');
+
+    const grid   = document.getElementById('wmTeacherGrid');
+    const search = document.getElementById('wmTeacherSearch');
+
+    const buildRows = (filter = '') => State.teachers.map(t => {
+      const color = getColor(teacherIndex(t.id));
+      const norm  = filter.toLowerCase();
+      const nameLower = t.name.toLowerCase();
+      if (norm && !nameLower.includes(norm)) return '';
+      let displayName = t.name;
+      if (norm) {
+        const idx = nameLower.indexOf(norm);
+        displayName = t.name.slice(0, idx)
+          + `<mark style="background:#FFF176;border-radius:2px;padding:0 1px">${t.name.slice(idx, idx + norm.length)}</mark>`
+          + t.name.slice(idx + norm.length);
+      }
+      return `<button class="wm-teacher-card" data-tid="${t.id}">
+        <div class="wm-teacher-av" style="background:${color};width:44px;height:44px;font-size:.85rem">${initials(t.name)}</div>
+        <div class="wm-teacher-card-name">${displayName}</div>
+        <div class="wm-teacher-dept" style="font-size:.65rem">${t.dept || ''}</div>
+      </button>`;
+    }).join('');
+
+    const wireCards = () => {
+      grid.querySelectorAll('.wm-teacher-card').forEach(btn => {
+        btn.addEventListener('click', () => {
+          State._pendingTeacherId = btn.dataset.tid;
+          showWelcomeModal('teacher-login');
+        });
       });
+    };
+    wireCards();
+
+    search?.addEventListener('input', () => {
+      grid.innerHTML = buildRows(search.value.trim());
+      wireCards();
     });
+    setTimeout(() => search?.focus(), 60);
+  }
+
+  if (page === 'teacher-login') {
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('picker'));
+    const doTeacherLogin = () => {
+      const pass   = (document.getElementById('tAuthPassword')?.value || '').trim();
+      const status = document.getElementById('tAuthStatus');
+      if (pass === ADMIN_PASSWORD) {  // same password "123"
+        if (status) status.textContent = '✅';
+        setTimeout(() => {
+          State.currentTeacherId = State._pendingTeacherId;
+          delete State._pendingTeacherId;
+          hideWelcomeModal();
+          applyRole('teacher');
+        }, 350);
+      } else {
+        if (status) status.textContent = '❌';
+        const pwd = document.getElementById('tAuthPassword');
+        if (pwd) pwd.value = '';
+        setTimeout(() => { const s = document.getElementById('tAuthStatus'); if (s) s.textContent = ''; }, 1500);
+      }
+    };
+    document.getElementById('tAuthSubmit')?.addEventListener('click', doTeacherLogin);
+    document.getElementById('tAuthPassword')?.addEventListener('keydown', e => { if (e.key === 'Enter') doTeacherLogin(); });
+    setTimeout(() => document.getElementById('tAuthPassword')?.focus(), 60);
   }
 }
 
@@ -1367,20 +1493,21 @@ function openTeacherModal(editId = null) {
   if (editId) {
     const t = teacherById(editId);
     title.textContent = 'Редактировать преподавателя';
-    document.getElementById('tName').value  = t.name || '';
-    document.getElementById('tPhone').value = t.phone || '';
-    document.getElementById('tLoad').value  = t.maxLoad || 2;
+    document.getElementById('tName').value     = t.name || '';
+    document.getElementById('tPhone').value    = t.phone || '';
+    document.getElementById('tLoad').value     = t.maxLoad || 2;
+    document.getElementById('tBuilding').value = t.building || '1';
     _modalDepts = Array.isArray(t.depts) && t.depts.length ? [...t.depts] : [t.dept].filter(Boolean);
   } else {
     title.textContent = 'Добавить преподавателя';
     ['tName','tPhone'].forEach(id => { document.getElementById(id).value = ''; });
     document.getElementById('tLoad').value = 2;
+    document.getElementById('tBuilding').value = '1';
     _modalDepts = [];
   }
 
   renderDeptManager(_modalDepts);
 
-  // ── Нежелательные даты ──
   const tid = editId;
   const existingBlackouts = tid ? (State.blackoutDates[tid] || []) : [];
   _modalBlackouts = [...existingBlackouts];
@@ -1452,6 +1579,7 @@ function saveTeacherModal() {
   const depts   = _modalDepts.filter(Boolean);
   const phone   = (document.getElementById('tPhone').value || '').trim();
   const maxLoad = Math.max(1, Math.min(6, parseInt(document.getElementById('tLoad').value) || 2));
+  const building = document.getElementById('tBuilding')?.value || '1';
   const editId  = document.getElementById('tEditId').value;
 
   if (!name) { showToast('Введите ФИО', 'error'); return; }
@@ -1462,14 +1590,14 @@ function saveTeacherModal() {
   if (editId) {
     const t = teacherById(editId);
     if (t) {
-      Object.assign(t, { name, dept, depts, phone, maxLoad });
+      Object.assign(t, { name, dept, depts, phone, maxLoad, building });
       State.blackoutDates[editId] = [...(_modalBlackouts || [])];
       t.blackoutDates = State.blackoutDates[editId];
     }
     showToast('Данные обновлены', 'success');
   } else {
     const newId = 't_' + Date.now();
-    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, blackoutDates: [...(_modalBlackouts || [])] });
+    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] });
     State.blackoutDates[newId] = [...(_modalBlackouts || [])];
     showToast(`${name} добавлен(а)`, 'success');
   }
@@ -1483,27 +1611,29 @@ function saveTeacherModal() {
 
 // ─── TEACHERS ────────────────────────────────────────────────────────────────
 
-// Keep original addTeacher for the inline form (still in DOM)
 function addTeacher() {
-  const nameEl   = document.getElementById('teacherName');
-  const deptSel  = document.getElementById('teacherDept');
-  const deptCust = document.getElementById('teacherDeptCustom');
-  const phoneEl  = document.getElementById('teacherPhone');
-  const loadEl   = document.getElementById('teacherLoad');
+  const nameEl     = document.getElementById('teacherName');
+  const deptSel    = document.getElementById('teacherDept');
+  const deptCust   = document.getElementById('teacherDeptCustom');
+  const phoneEl    = document.getElementById('teacherPhone');
+  const loadEl     = document.getElementById('teacherLoad');
+  const buildingEl = document.getElementById('teacherBuilding');
 
-  const name    = nameEl.value.trim();
-  const dept    = deptCust.value.trim() || deptSel.value;
-  const phone   = phoneEl.value.trim();
-  const maxLoad = Math.max(1, Math.min(5, parseInt(loadEl.value) || 2));
+  const name     = nameEl.value.trim();
+  const dept     = deptCust.value.trim() || deptSel.value;
+  const phone    = phoneEl.value.trim();
+  const maxLoad  = Math.max(1, Math.min(6, parseInt(loadEl?.value) || 2));
+  const building = buildingEl?.value || '1';
 
   if (!name) { showToast('Введите ФИО преподавателя', 'error'); nameEl.focus(); return; }
   if (!dept || dept === '') { showToast('Выберите или введите кафедру', 'error'); deptSel.focus(); return; }
 
-  State.teachers.push({ id: 't_' + Date.now(), name, dept, phone, maxLoad });
+  const newId = 't_' + Date.now();
+  State.teachers.push({ id: newId, name, dept, depts: [dept], phone, maxLoad, building, blackoutDates: [] });
   State.save();
 
   nameEl.value = ''; deptSel.value = '';
-  deptCust.value = ''; phoneEl.value = ''; loadEl.value = '2';
+  deptCust.value = ''; phoneEl.value = ''; if (loadEl) loadEl.value = '2';
   nameEl.focus();
 
   renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet();
@@ -1534,13 +1664,13 @@ function getMonthDutyCount(tid) {
 }
 
 function renderTeachersList() {
-  const list  = document.getElementById('teachersList');
-  const badge = document.getElementById('teacherCount');
+  const container = document.getElementById('teachersList');
+  const badge     = document.getElementById('teacherCount');
   if (badge) badge.textContent = State.teachers.length;
-  if (!list) return;
+  if (!container) return;
 
   if (State.teachers.length === 0) {
-    list.innerHTML = `<div class="empty-state">
+    container.innerHTML = `<div class="empty-state">
       <div class="empty-icon">📋</div>
       <p class="empty-title">Список пуст</p>
       <p class="empty-sub">Нажмите «Добавить преподавателя»</p>
@@ -1549,17 +1679,18 @@ function renderTeachersList() {
   }
 
   const maxD = getWorkdaysInMonth();
-  list.innerHTML = State.teachers.map((t, idx) => {
+
+  const renderCard = (t, idx) => {
     const color    = getColor(idx);
     const dc       = getMonthDutyCount(t.id);
     const pct      = maxD ? Math.min(100, Math.round(dc / maxD * 100)) : 0;
     const barColor = pct > 70 ? '#1E8449' : color;
-
+    const bLabel   = t.building ? `${t.building} корп.` : '';
     return `<div class="teacher-card">
       <div class="t-avatar" style="background:${color}">${initials(t.name)}</div>
       <div class="t-info">
         <div class="t-name">${t.name}</div>
-        <div class="t-meta">${t.dept} · макс ${t.maxLoad} дн/нед</div>
+        <div class="t-meta">${t.dept}${bLabel ? ' · ' + bLabel : ''} · макс ${t.maxLoad} дн/нед</div>
         ${t.phone ? `<div class="t-phone">${t.phone}</div>` : ''}
       </div>
       <div class="t-load">
@@ -1576,12 +1707,36 @@ function renderTeachersList() {
         </button>
       </div>
     </div>`;
-  }).join('');
+  };
 
-  list.querySelectorAll('[data-edit]').forEach(btn => {
+  // Split into 3 building columns
+  const byBuilding = { '1': [], '2': [], '3': [] };
+  State.teachers.forEach((t, idx) => {
+    const b = t.building || '1';
+    if (!byBuilding[b]) byBuilding[b] = [];
+    byBuilding[b].push({ t, idx });
+  });
+
+  container.innerHTML = `
+    <div class="building-columns">
+      ${['1','2','3'].map(b => `
+        <div class="building-col">
+          <div class="building-col-header">
+            <span class="building-col-label">🏢 ${b} корпус</span>
+            <span class="building-col-count">${byBuilding[b].length} преп.</span>
+          </div>
+          <div class="building-col-list">
+            ${byBuilding[b].length === 0
+              ? `<div style="font-size:.78rem;color:var(--text-faint);padding:.5rem;font-style:italic">Нет преподавателей</div>`
+              : byBuilding[b].map(({ t, idx }) => renderCard(t, idx)).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  container.querySelectorAll('[data-edit]').forEach(btn => {
     btn.addEventListener('click', () => openTeacherModal(btn.dataset.edit));
   });
-  list.querySelectorAll('[data-id]').forEach(btn => {
+  container.querySelectorAll('[data-id]').forEach(btn => {
     btn.addEventListener('click', () => removeTeacher(btn.dataset.id));
   });
 }
@@ -1799,63 +1954,74 @@ function autoDistribute() {
     const weekKeys = getWeekKeys(key);
     const weekId   = weekKeys[0];
 
-    // ── ШАГ 1: Выбрать ОДНОГО дежурного на весь день ──────────────────
     const blackoutCheck = (t) => {
       const bl = [...(Array.isArray(t.blackoutDates) ? t.blackoutDates : []), ...(State.blackoutDates[t.id] || [])];
       return bl.includes(key);
     };
 
-    const dutyCandidates = State.teachers
-      .filter(t => !blackoutCheck(t))
-      .map(t => {
-        const wc = weekCounts[t.id][weekId] || 0;
-        const score = monthCounts[t.id] * 10 + wc * 100 + (wc >= t.maxLoad ? 500 : 0) + Math.random();
-        return { t, score };
-      })
-      .sort((a, b) => a.score - b.score);
-
-    let dutyTeacher = null;
-    if (dutyCandidates.length > 0) {
-      dutyTeacher = dutyCandidates[0].t;
-      const dept = Array.isArray(dutyTeacher.depts) && dutyTeacher.depts.length
-        ? dutyTeacher.depts[0] : (dutyTeacher.dept || '');
-      State.duties[key] = [{ tid: dutyTeacher.id, dept }];
-      weekCounts[dutyTeacher.id][weekId] = (weekCounts[dutyTeacher.id][weekId] || 0) + 1;
-      monthCounts[dutyTeacher.id]++;
-    }
-
-    // ── ШАГ 2: Распределить преподавателей по парам — с разнобоем ──────
+    // ── ШАГ 1: Пары — contiguous distribution ───────────────────────
     if (!State.lessons[key]) State.lessons[key] = {};
     PAIR_NUMS.forEach(pn => { State.lessons[key][pn] = []; });
 
-    // Перемешиваем учителей случайно (Fisher-Yates)
     const shuffled = [...State.teachers].filter(t => !blackoutCheck(t));
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
 
-    // Случайное количество преподавателей на пару: от 1 до 4
-    // Распределяем по парам с разным наполнением
+    // Распределяем учителей по парам начиная с 1-й, без пробелов в середине.
+    // Пустыми могут быть только последние пары.
+    const maxTeachersPerPair = Math.max(2, Math.ceil(shuffled.length / PAIR_NUMS.length));
     let tIdx = 0;
-    const totalTeachers = shuffled.length;
-    PAIR_NUMS.forEach((pairN, pairIdx) => {
-      // Случайный размер слота: чтобы суммарно охватить всех, но с разбросом
-      const remaining = totalTeachers - tIdx;
-      const pairsLeft = PAIR_NUMS.length - pairIdx;
-      const minPerPair = Math.max(1, Math.floor(remaining / pairsLeft / 2));
-      const maxPerPair = Math.min(4, Math.ceil(remaining / pairsLeft * 1.5));
-      const slotSize   = Math.max(0, minPerPair + Math.floor(Math.random() * (maxPerPair - minPerPair + 1)));
+    for (let pi = 0; pi < PAIR_NUMS.length && tIdx < shuffled.length; pi++) {
+      const pairN   = PAIR_NUMS[pi];
+      // Случайный размер слота (но не 0 пока есть учителя)
+      const remaining = shuffled.length - tIdx;
+      const pairsLeft = PAIR_NUMS.length - pi;
+      const minSlot = Math.max(1, Math.floor(remaining / pairsLeft / 1.5));
+      const maxSlot = Math.min(maxTeachersPerPair, Math.ceil(remaining / pairsLeft * 1.8));
+      const slotSize = minSlot + Math.floor(Math.random() * (maxSlot - minSlot + 1));
 
-      for (let s = 0; s < slotSize && tIdx < totalTeachers; s++, tIdx++) {
-        const t = shuffled[tIdx];
-        const dept = Array.isArray(t.depts) && t.depts.length ? t.depts[0] : (t.dept || '');
-        // Авто-кабинет: 100–599, привязан к преподавателю стабильно
+      for (let s = 0; s < slotSize && tIdx < shuffled.length; s++, tIdx++) {
+        const t     = shuffled[tIdx];
+        const dept  = Array.isArray(t.depts) && t.depts.length ? t.depts[0] : (t.dept || '');
         const roomBase = 100 + (teacherIndex(t.id) * 37 + pairN * 13) % 500;
         State.lessons[key][pairN].push({ tid: t.id, dept, room: String(roomBase) });
         pairCounts[t.id]++;
       }
-    });
+    }
+
+    // ── ШАГ 2: Дежурный — тот кто стоит на 1-й паре (или 2-й), max 2/месяц ──
+    const pair1Teachers = State.lessons[key][1] || [];
+    const pair2Teachers = State.lessons[key][2] || [];
+
+    // Ищем кандидата из пары 1, потом пары 2
+    const dutyPool = [...pair1Teachers, ...pair2Teachers];
+    let dutyTeacher = null;
+
+    for (const entry of dutyPool) {
+      const t = teacherById(entry.tid);
+      if (!t) continue;
+      if (blackoutCheck(t)) continue;
+      if (monthCounts[t.id] >= 2) continue;  // max 2 дежурства в месяц
+      dutyTeacher = t;
+      break;
+    }
+
+    // Fallback: если никто из пар 1/2 не подходит — берём любого
+    if (!dutyTeacher) {
+      dutyTeacher = State.teachers
+        .filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
+        .sort((a, b) => monthCounts[a.id] - monthCounts[b.id])[0] || null;
+    }
+
+    if (dutyTeacher) {
+      const dept = Array.isArray(dutyTeacher.depts) && dutyTeacher.depts.length
+        ? dutyTeacher.depts[0] : (dutyTeacher.dept || '');
+      State.duties[key] = [{ tid: dutyTeacher.id, dept }];
+      weekCounts[dutyTeacher.id][weekId] = (weekCounts[dutyTeacher.id][weekId] || 0) + 1;
+      monthCounts[dutyTeacher.id]++;
+    }
   });
 
   State.save();
@@ -2110,6 +2276,14 @@ function init() {
   // Welcome modal wiring (единое окно)
   const wOverlay = document.getElementById('welcomeModalOverlay');
   // welcomeModalOverlay — клик вне карточки НЕ закрывает (обязательный выбор роли)
+
+  // ★ Building filter
+  const bfSel = document.getElementById('buildingFilter');
+  if (bfSel) bfSel.addEventListener('change', () => {
+    State.activeBuilding = bfSel.value;
+    renderCalendar();
+    renderAccordion();
+  });
   if (wOverlay) wOverlay.addEventListener('click', e => e.stopPropagation());
 
   // Initial render
@@ -2129,26 +2303,38 @@ async function seedDemoData() {
   if (!sb) { showToast('Supabase не подключён', 'error'); return; }
 
   const demoTeachers = [
-    { id: 'demo_01', name: 'Иванов Сергей Николаевич',      dept: 'Кафедра математики',                  phone: '+7 (910) 234-56-78', max_load: 2, blackout_dates: [] },
-    { id: 'demo_02', name: 'Петрова Ольга Дмитриевна',      dept: 'Кафедра информатики и ВТ',            phone: '+7 (926) 345-67-89', max_load: 2, blackout_dates: [] },
-    { id: 'demo_03', name: 'Смирнов Алексей Юрьевич',       dept: 'Кафедра физики',                      phone: '+7 (905) 456-78-90', max_load: 3, blackout_dates: [] },
-    { id: 'demo_04', name: 'Козлова Наталья Владимировна',  dept: 'Кафедра химии и биологии',            phone: '+7 (916) 567-89-01', max_load: 2, blackout_dates: [] },
-    { id: 'demo_05', name: 'Новиков Дмитрий Александрович', dept: 'Кафедра истории и обществознания',    phone: '+7 (999) 678-90-12', max_load: 2, blackout_dates: [] },
-    { id: 'demo_06', name: 'Морозова Татьяна Игоревна',     dept: 'Кафедра русского языка и литературы', phone: '+7 (903) 789-01-23', max_load: 2, blackout_dates: [] },
-    { id: 'demo_07', name: 'Волков Андрей Петрович',        dept: 'Кафедра иностранных языков',          phone: '+7 (925) 890-12-34', max_load: 3, blackout_dates: [] },
-    { id: 'demo_08', name: 'Лебедева Марина Сергеевна',     dept: 'Кафедра физической культуры',         phone: '+7 (909) 901-23-45', max_load: 2, blackout_dates: [] },
-    { id: 'demo_09', name: 'Соколов Павел Евгеньевич',      dept: 'Кафедра экономики и права',           phone: '+7 (911) 012-34-56', max_load: 2, blackout_dates: [] },
-    { id: 'demo_10', name: 'Попова Елена Константиновна',   dept: 'Кафедра психологии и педагогики',     phone: '+7 (917) 123-45-67', max_load: 3, blackout_dates: [] },
-    { id: 'demo_11', name: 'Кузнецов Игорь Васильевич',     dept: 'Кафедра математики',                  phone: '+7 (912) 234-56-78', max_load: 2, blackout_dates: [] },
-    { id: 'demo_12', name: 'Белова Анна Михайловна',        dept: 'Кафедра информатики и ВТ',            phone: '+7 (920) 345-67-89', max_load: 2, blackout_dates: [] },
-    { id: 'demo_13', name: 'Орлов Максим Андреевич',        dept: 'Кафедра физики',                      phone: '+7 (913) 456-78-90', max_load: 2, blackout_dates: [] },
-    { id: 'demo_14', name: 'Захарова Светлана Олеговна',    dept: 'Кафедра химии и биологии',            phone: '+7 (921) 567-89-01', max_load: 2, blackout_dates: [] },
-    { id: 'demo_15', name: 'Федоров Роман Викторович',      dept: 'Кафедра истории и обществознания',    phone: '+7 (914) 678-90-12', max_load: 3, blackout_dates: [] },
-    { id: 'demo_16', name: 'Громова Юлия Алексеевна',       dept: 'Кафедра русского языка и литературы', phone: '+7 (922) 789-01-23', max_load: 2, blackout_dates: [] },
-    { id: 'demo_17', name: 'Тихонов Артём Борисович',       dept: 'Кафедра иностранных языков',          phone: '+7 (915) 890-12-34', max_load: 2, blackout_dates: [] },
-    { id: 'demo_18', name: 'Макарова Диана Руслановна',     dept: 'Кафедра физической культуры',         phone: '+7 (923) 901-23-45', max_load: 2, blackout_dates: [] },
-    { id: 'demo_19', name: 'Степанов Кирилл Николаевич',    dept: 'Кафедра экономики и права',           phone: '+7 (918) 012-34-56', max_load: 3, blackout_dates: [] },
-    { id: 'demo_20', name: 'Васильева Надежда Геннадьевна', dept: 'Кафедра психологии и педагогики',     phone: '+7 (924) 123-45-67', max_load: 2, blackout_dates: [] },
+    { id:'demo_01', name:'Иванов Сергей Николаевич',        dept:'Кафедра математики',                  phone:'+7 (910) 234-56-78', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_02', name:'Петрова Ольга Дмитриевна',        dept:'Кафедра информатики и ВТ',            phone:'+7 (926) 345-67-89', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_03', name:'Смирнов Алексей Юрьевич',         dept:'Кафедра физики',                      phone:'+7 (905) 456-78-90', max_load:3, building:'1', blackout_dates:[] },
+    { id:'demo_04', name:'Козлова Наталья Владимировна',    dept:'Кафедра химии и биологии',            phone:'+7 (916) 567-89-01', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_05', name:'Новиков Дмитрий Александрович',  dept:'Кафедра истории и обществознания',    phone:'+7 (999) 678-90-12', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_06', name:'Морозова Татьяна Игоревна',       dept:'Кафедра русского языка и литературы', phone:'+7 (903) 789-01-23', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_07', name:'Волков Андрей Петрович',          dept:'Кафедра иностранных языков',          phone:'+7 (925) 890-12-34', max_load:3, building:'3', blackout_dates:[] },
+    { id:'demo_08', name:'Лебедева Марина Сергеевна',       dept:'Кафедра физической культуры',         phone:'+7 (909) 901-23-45', max_load:2, building:'3', blackout_dates:[] },
+    { id:'demo_09', name:'Соколов Павел Евгеньевич',        dept:'Кафедра экономики и права',           phone:'+7 (911) 012-34-56', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_10', name:'Попова Елена Константиновна',     dept:'Кафедра психологии и педагогики',     phone:'+7 (917) 123-45-67', max_load:3, building:'1', blackout_dates:[] },
+    { id:'demo_11', name:'Кузнецов Игорь Васильевич',       dept:'Кафедра математики',                  phone:'+7 (912) 234-56-78', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_12', name:'Белова Анна Михайловна',          dept:'Кафедра информатики и ВТ',            phone:'+7 (920) 345-67-89', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_13', name:'Орлов Максим Андреевич',          dept:'Кафедра физики',                      phone:'+7 (913) 456-78-90', max_load:2, building:'3', blackout_dates:[] },
+    { id:'demo_14', name:'Захарова Светлана Олеговна',      dept:'Кафедра химии и биологии',            phone:'+7 (921) 567-89-01', max_load:2, building:'3', blackout_dates:[] },
+    { id:'demo_15', name:'Федоров Роман Викторович',        dept:'Кафедра истории и обществознания',    phone:'+7 (914) 678-90-12', max_load:3, building:'1', blackout_dates:[] },
+    { id:'demo_16', name:'Громова Юлия Алексеевна',         dept:'Кафедра русского языка и литературы', phone:'+7 (922) 789-01-23', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_17', name:'Тихонов Артём Борисович',         dept:'Кафедра иностранных языков',          phone:'+7 (915) 890-12-34', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_18', name:'Макарова Диана Руслановна',       dept:'Кафедра физической культуры',         phone:'+7 (923) 901-23-45', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_19', name:'Степанов Кирилл Николаевич',      dept:'Кафедра экономики и права',           phone:'+7 (918) 012-34-56', max_load:3, building:'3', blackout_dates:[] },
+    { id:'demo_20', name:'Васильева Надежда Геннадьевна',   dept:'Кафедра психологии и педагогики',     phone:'+7 (924) 123-45-67', max_load:2, building:'3', blackout_dates:[] },
+    { id:'demo_21', name:'Архипов Денис Михайлович',        dept:'Кафедра математики',                  phone:'+7 (916) 235-67-89', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_22', name:'Чернова Инна Александровна',      dept:'Кафедра информатики и ВТ',            phone:'+7 (927) 346-78-90', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_23', name:'Карпов Евгений Семёнович',        dept:'Кафедра физики',                      phone:'+7 (906) 457-89-01', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_24', name:'Николаева Вера Павловна',         dept:'Кафедра химии и биологии',            phone:'+7 (918) 568-90-12', max_load:3, building:'2', blackout_dates:[] },
+    { id:'demo_25', name:'Боров Алексей Геннадьевич',       dept:'Кафедра истории и обществознания',    phone:'+7 (900) 679-01-23', max_load:2, building:'3', blackout_dates:[] },
+    { id:'demo_26', name:'Крылова Ирина Юрьевна',           dept:'Кафедра русского языка и литературы', phone:'+7 (904) 780-12-34', max_load:2, building:'3', blackout_dates:[] },
+    { id:'demo_27', name:'Зайцев Павел Андреевич',          dept:'Кафедра иностранных языков',          phone:'+7 (926) 891-23-45', max_load:2, building:'1', blackout_dates:[] },
+    { id:'demo_28', name:'Медведева Светлана Борисовна',    dept:'Кафедра физической культуры',         phone:'+7 (910) 902-34-56', max_load:3, building:'1', blackout_dates:[] },
+    { id:'demo_29', name:'Ильин Константин Сергеевич',      dept:'Кафедра экономики и права',           phone:'+7 (912) 013-45-67', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_30', name:'Власова Анастасия Николаевна',    dept:'Кафедра психологии и педагогики',     phone:'+7 (918) 124-56-78', max_load:2, building:'2', blackout_dates:[] },
+    { id:'demo_31', name:'Горбунов Михаил Владимирович',    dept:'Кафедра математики',                  phone:'+7 (913) 235-67-89', max_load:3, building:'3', blackout_dates:[] },
+    { id:'demo_32', name:'Романова Екатерина Ивановна',     dept:'Кафедра информатики и ВТ',            phone:'+7 (921) 346-78-90', max_load:2, building:'3', blackout_dates:[] },
   ];
 
   const { error } = await sb.from('teachers').upsert(demoTeachers, { onConflict: 'id' });
@@ -2178,14 +2364,16 @@ document.addEventListener('DOMContentLoaded', init);
 //   CREATE TABLE teachers (
 //     id             TEXT PRIMARY KEY,
 //     name           TEXT NOT NULL,
-//     dept           TEXT NOT NULL DEFAULT '',   -- основная кафедра
-//     depts          JSONB DEFAULT '[]',          -- ★ все кафедры преподавателя
+//     dept           TEXT NOT NULL DEFAULT '',
+//     depts          JSONB DEFAULT '[]',
 //     phone          TEXT DEFAULT '',
 //     max_load       INT  DEFAULT 2,
-//     blackout_dates JSONB DEFAULT '[]'
+//     blackout_dates JSONB DEFAULT '[]',
+//     building       TEXT DEFAULT '1'   -- '1' | '2' | '3' корпус
 //   );
 //   -- Миграция если таблица уже есть:
 //   -- ALTER TABLE teachers ADD COLUMN IF NOT EXISTS depts JSONB DEFAULT '[]';
+//   -- ALTER TABLE teachers ADD COLUMN IF NOT EXISTS building TEXT DEFAULT '1';
 //
 //   -- ★ ВАЖНО: составной PRIMARY KEY (date_key, teacher_id, dept)
 //   --   позволяет одному преподавателю быть в один день с разными кафедрами.
@@ -2336,7 +2524,6 @@ async function loadSchedule() {
 // ─── МАППИНГ СТРОКИ БД → ОБЪЕКТ УЧИТЕЛЯ ─────────────────────────────────────
 
 function mapTeacherRow(r) {
-  // Поддержка нового поля depts (массив) и старого dept (строка)
   let depts = [];
   if (Array.isArray(r.depts) && r.depts.length) {
     depts = r.depts;
@@ -2346,11 +2533,12 @@ function mapTeacherRow(r) {
   return {
     id:            r.id,
     name:          r.name,
-    dept:          depts[0] || '',           // главная кафедра (обратная совместимость)
-    depts:         depts,                    // все кафедры
+    dept:          depts[0] || '',
+    depts:         depts,
     phone:         r.phone || '',
     maxLoad:       r.max_load || 2,
     blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [],
+    building:      r.building || '1',   // '1' | '2' | '3'
   };
 }
 
@@ -2369,6 +2557,7 @@ async function saveTeachers(teacher) {
       phone:          teacher.phone || '',
       max_load:       teacher.maxLoad || 2,
       blackout_dates: State.blackoutDates[teacher.id] || [],
+      building:       teacher.building || '1',
     }, { onConflict: 'id' });
   if (error) console.warn('[SB] saveTeachers error:', error.message);
 }

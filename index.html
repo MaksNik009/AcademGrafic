@@ -203,6 +203,16 @@
             <svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M7.5 5l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
+        <!-- ★ Building filter -->
+        <div class="select-wrap building-filter-wrap" style="min-width:130px">
+          <select class="field-input field-select building-filter-sel" id="buildingFilter" style="height:34px;font-size:.82rem;border-radius:20px;padding:0 30px 0 12px">
+            <option value="all">Все корпуса</option>
+            <option value="1">1 корпус</option>
+            <option value="2">2 корпус</option>
+            <option value="3">3 корпус</option>
+          </select>
+          <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
         <div class="legend">
           <span class="legend-item"><span class="legend-dot legend-dot--assigned" aria-hidden="true"></span>Назначен</span>
           <span class="legend-item"><span class="legend-dot legend-dot--today" aria-hidden="true"></span>Сегодня</span>
@@ -254,7 +264,7 @@
       </div>
       <div class="teachers-layout">
 
-        <aside class="card">
+        <aside class="card" style="max-width:280px">
           <div class="card-header">
             <h3 class="card-title">Добавить преподавателя</h3>
           </div>
@@ -266,42 +276,40 @@
                      autocomplete="name" aria-required="true"/>
             </div>
 
-            <!-- ★ NEW: Department dropdown -->
             <div class="field-group">
               <label class="field-label" for="teacherDept">Кафедра <span class="required" aria-hidden="true">*</span></label>
-              <div class="select-wrap">
-                <select class="field-input field-select" id="teacherDept" aria-required="true">
-                  <option value="">— выберите кафедру —</option>
-                  <option>Кафедра информатики и ВТ</option>
-                  <option>Кафедра математики</option>
-                  <option>Кафедра физики</option>
-                  <option>Кафедра химии и биологии</option>
-                  <option>Кафедра истории и обществознания</option>
-                  <option>Кафедра русского языка и литературы</option>
-                  <option>Кафедра иностранных языков</option>
-                  <option>Кафедра физической культуры</option>
-                  <option>Кафедра экономики и права</option>
-                  <option>Кафедра психологии и педагогики</option>
-                </select>
-                <svg class="select-arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">
-                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+              <div style="display:flex;gap:6px;align-items:flex-start">
+                <div class="select-wrap" style="flex:1">
+                  <select class="field-input field-select" id="teacherDept" aria-required="true">
+                    <option value="">— выберите —</option>
+                    <option>Кафедра информатики и ВТ</option>
+                    <option>Кафедра математики</option>
+                    <option>Кафедра физики</option>
+                    <option>Кафедра химии и биологии</option>
+                    <option>Кафедра истории и обществознания</option>
+                    <option>Кафедра русского языка и литературы</option>
+                    <option>Кафедра иностранных языков</option>
+                    <option>Кафедра физической культуры</option>
+                    <option>Кафедра экономики и права</option>
+                    <option>Кафедра психологии и педагогики</option>
+                  </select>
+                  <svg class="select-arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">
+                    <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
               </div>
-              <!-- Optional: type your own -->
               <input class="field-input field-input--sm" type="text" id="teacherDeptCustom"
                      placeholder="или введите свою кафедру…"/>
             </div>
 
-            <!-- ★ NEW: Phone field -->
             <div class="field-group">
-              <label class="field-label" for="teacherPhone">Контактный телефон</label>
+              <label class="field-label" for="teacherPhone">Телефон</label>
               <div class="field-icon-wrap">
                 <svg class="field-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">
                   <path d="M3 2.5A1.5 1.5 0 014.5 1h.879a1 1 0 01.95.684l.74 2.217a1 1 0 01-.23 1.03L5.4 5.87a8.001 8.001 0 004.73 4.73l.94-1.44a1 1 0 011.03-.23l2.217.74A1 1 0 0115 10.62V11.5A1.5 1.5 0 0113.5 13C6.596 13 1 7.404 1 .5A1.5 1.5 0 012.5 2h1z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                 </svg>
                 <input class="field-input field-input--icon" type="tel" id="teacherPhone"
-                       placeholder="+7 (___) ___-__-__"
-                       autocomplete="tel"/>
+                       placeholder="+7 (___) ___-__-__" autocomplete="tel"/>
               </div>
             </div>
 
@@ -309,12 +317,24 @@
               <label class="field-label" for="teacherLoad">Макс. нагрузка</label>
               <div class="field-row">
                 <input class="field-input field-input--narrow" type="number"
-                       id="teacherLoad" min="1" max="5" value="2"/>
+                       id="teacherLoad" min="1" max="6" value="2"/>
                 <span class="field-unit">дн / нед</span>
               </div>
             </div>
 
-            <button class="btn btn--primary btn--full" id="addTeacherBtn">+ Добавить преподавателя</button>
+            <div class="field-group">
+              <label class="field-label" for="teacherBuilding">Корпус</label>
+              <div class="select-wrap">
+                <select class="field-input field-select" id="teacherBuilding">
+                  <option value="1">1 корпус</option>
+                  <option value="2">2 корпус</option>
+                  <option value="3">3 корпус</option>
+                </select>
+                <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </div>
+
+            <button class="btn btn--primary btn--full" id="addTeacherBtn">+ Добавить</button>
           </div>
         </aside>
 
@@ -405,6 +425,17 @@
             <div class="field-row">
               <input class="field-input field-input--narrow" type="number" id="tLoad" min="1" max="6" value="2"/>
               <span class="field-unit">дн / нед</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="tBuilding">Корпус</label>
+            <div class="select-wrap">
+              <select class="field-input field-select" id="tBuilding">
+                <option value="1">1 корпус</option>
+                <option value="2">2 корпус</option>
+                <option value="3">3 корпус</option>
+              </select>
+              <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
           </div>
         </div>
