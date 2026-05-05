@@ -74,7 +74,7 @@ const State = {
   selectedTeacherId: null,
   modalMode: 'assign',
   activeDayKey: null,
-  activeBuilding: 'all',   // 'all' | '1' | '2' | '3'
+  activeBuilding: '1',   // '1' | '2' | '3' — no 'all', each user sees their building
 
   avatarColors: [
     '#2C6FAC','#1A7A4A','#8E44AD','#C0392B',
@@ -254,10 +254,20 @@ function applyRole(role) {
   document.getElementById('roleAdmin').setAttribute('aria-pressed', role === 'admin');
   document.getElementById('roleTeacher').setAttribute('aria-pressed', role === 'teacher');
 
+  if (role === 'admin') {
+    // Admin defaults to building 1
+    State.activeBuilding = '1';
+    _syncBuildingTabs('1');
+  }
+
   if (role === 'teacher') {
     if (!State.currentTeacherId && State.teachers.length > 0) {
       State.currentTeacherId = State.teachers[0].id;
     }
+    // Teacher sees their own building
+    const t = teacherById(State.currentTeacherId);
+    State.activeBuilding = t?.building || '1';
+    _syncBuildingTabs(State.activeBuilding);
     if (typeof closeDayPanel === 'function') closeDayPanel();
     switchTab('calendar');
     renderMyCabinet();
@@ -265,6 +275,13 @@ function applyRole(role) {
 
   renderCalendar();
   renderAccordion();
+}
+
+/** Syncs the building tab UI to the given building value */
+function _syncBuildingTabs(b) {
+  document.querySelectorAll('.building-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.building === b);
+  });
 }
 
 // ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
@@ -1611,30 +1628,83 @@ function saveTeacherModal() {
 
 // ─── TEACHERS ────────────────────────────────────────────────────────────────
 
+let _inlineDepts = [];  // dept list for the inline add-teacher form
+
+/** Same as renderDeptManager but targets #inlineDeptsSection */
+function renderInlineDeptManager(depts) {
+  const container = document.getElementById('inlineDeptsSection');
+  if (!container) return;
+
+  const tagsHtml = depts.length
+    ? depts.map((d, i) => `
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+          <span style="flex:1;font-size:.78rem;background:var(--blue-light);border:1px solid var(--blue);border-radius:4px;padding:2px 8px;color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d}</span>
+          <button type="button" class="modal-remove-one" data-inline-del="${i}" style="flex-shrink:0">✕</button>
+        </div>`).join('')
+    : '<div style="font-size:.75rem;color:var(--text-faint);font-style:italic">Нет кафедр</div>';
+
+  container.innerHTML = `
+    <div id="inlineDeptTags" style="margin-bottom:6px">${tagsHtml}</div>
+    <div style="display:flex;gap:5px;margin-bottom:4px">
+      <div class="select-wrap" style="flex:1;min-width:0">
+        <select class="field-input field-select" id="inlineDeptPickSel" style="height:32px;font-size:.78rem">
+          <option value="">— выбрать из списка —</option>
+          ${globalDepts.map(d => `<option value="${d.replace(/"/g,'&quot;')}">${d}</option>`).join('')}
+        </select>
+        <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <button type="button" class="btn btn--outline" id="inlineDeptAddFromList" style="padding:.3rem .7rem;font-size:.78rem;height:32px">+</button>
+    </div>
+    <div style="display:flex;gap:5px">
+      <input class="field-input" id="inlineDeptNewInput" placeholder="Новая кафедра…" style="flex:1;height:32px;font-size:.78rem"/>
+      <button type="button" class="btn btn--outline" id="inlineDeptAddNew" style="padding:.3rem .7rem;font-size:.78rem;height:32px;white-space:nowrap">+ Создать</button>
+    </div>`;
+
+  container.querySelectorAll('[data-inline-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _inlineDepts.splice(parseInt(btn.dataset.inlineDel), 1);
+      renderInlineDeptManager(_inlineDepts);
+    });
+  });
+  document.getElementById('inlineDeptAddFromList')?.addEventListener('click', () => {
+    const val = document.getElementById('inlineDeptPickSel')?.value;
+    if (!val) return;
+    if (!_inlineDepts.includes(val)) { _inlineDepts.push(val); renderInlineDeptManager(_inlineDepts); }
+    else showToast('Уже добавлено', 'info');
+  });
+  document.getElementById('inlineDeptAddNew')?.addEventListener('click', () => {
+    const val = (document.getElementById('inlineDeptNewInput')?.value || '').trim();
+    if (!val) return;
+    if (!globalDepts.includes(val)) { globalDepts.push(val); saveGlobalDepts(globalDepts); }
+    if (!_inlineDepts.includes(val)) { _inlineDepts.push(val); renderInlineDeptManager(_inlineDepts); }
+    else showToast('Уже добавлено', 'info');
+  });
+}
+
 function addTeacher() {
   const nameEl     = document.getElementById('teacherName');
-  const deptSel    = document.getElementById('teacherDept');
-  const deptCust   = document.getElementById('teacherDeptCustom');
   const phoneEl    = document.getElementById('teacherPhone');
   const loadEl     = document.getElementById('teacherLoad');
   const buildingEl = document.getElementById('teacherBuilding');
 
   const name     = nameEl.value.trim();
-  const dept     = deptCust.value.trim() || deptSel.value;
-  const phone    = phoneEl.value.trim();
+  const depts    = [..._inlineDepts];
+  const phone    = phoneEl?.value.trim() || '';
   const maxLoad  = Math.max(1, Math.min(6, parseInt(loadEl?.value) || 2));
   const building = buildingEl?.value || '1';
 
   if (!name) { showToast('Введите ФИО преподавателя', 'error'); nameEl.focus(); return; }
-  if (!dept || dept === '') { showToast('Выберите или введите кафедру', 'error'); deptSel.focus(); return; }
+  if (!depts.length) { showToast('Добавьте хотя бы одну кафедру', 'error'); return; }
 
   const newId = 't_' + Date.now();
-  State.teachers.push({ id: newId, name, dept, depts: [dept], phone, maxLoad, building, blackoutDates: [] });
+  State.teachers.push({ id: newId, name, dept: depts[0], depts, phone, maxLoad, building, blackoutDates: [] });
   State.save();
 
-  nameEl.value = ''; deptSel.value = '';
-  deptCust.value = ''; phoneEl.value = ''; if (loadEl) loadEl.value = '2';
-  nameEl.focus();
+  nameEl.value = '';
+  if (phoneEl) phoneEl.value = '';
+  if (loadEl) loadEl.value = '2';
+  _inlineDepts = [];
+  renderInlineDeptManager(_inlineDepts);
 
   renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet();
   showToast(`${name} добавлен(а)`, 'success');
@@ -1709,7 +1779,7 @@ function renderTeachersList() {
     </div>`;
   };
 
-  // Split into 3 building columns
+  // Split into 3 building collapsible sections
   const byBuilding = { '1': [], '2': [], '3': [] };
   State.teachers.forEach((t, idx) => {
     const b = t.building || '1';
@@ -1717,21 +1787,48 @@ function renderTeachersList() {
     byBuilding[b].push({ t, idx });
   });
 
-  container.innerHTML = `
-    <div class="building-columns">
-      ${['1','2','3'].map(b => `
-        <div class="building-col">
-          <div class="building-col-header">
-            <span class="building-col-label">🏢 ${b} корпус</span>
-            <span class="building-col-count">${byBuilding[b].length} преп.</span>
-          </div>
-          <div class="building-col-list">
-            ${byBuilding[b].length === 0
-              ? `<div style="font-size:.78rem;color:var(--text-faint);padding:.5rem;font-style:italic">Нет преподавателей</div>`
-              : byBuilding[b].map(({ t, idx }) => renderCard(t, idx)).join('')}
-          </div>
-        </div>`).join('')}
-    </div>`;
+  container.innerHTML = ['1','2','3'].map(b => `
+    <details class="building-section" open>
+      <summary class="building-section-header">
+        <span class="building-section-label">🏢 ${b} корпус</span>
+        <span class="building-section-count">${byBuilding[b].length} преп.</span>
+        <span class="building-section-chevron">▾</span>
+      </summary>
+      <div class="building-section-table">
+        ${byBuilding[b].length === 0
+          ? `<div class="building-empty">Нет преподавателей</div>`
+          : `<table class="teacher-table">
+              <thead><tr>
+                <th>ФИО</th><th>Кафедра</th><th>Телефон</th>
+                <th style="text-align:center">Нагр.</th><th style="text-align:center">Дн.</th><th></th>
+              </tr></thead>
+              <tbody>${byBuilding[b].map(({ t, idx }) => {
+                const color = getColor(idx);
+                const dc    = getMonthDutyCount(t.id);
+                return `<tr>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+                      <span style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name}</span>
+                    </div>
+                  </td>
+                  <td style="font-size:.75rem;color:var(--text-muted)">${t.dept}</td>
+                  <td style="font-size:.75rem;font-family:var(--font-mono)">${t.phone || '—'}</td>
+                  <td style="text-align:center;font-size:.78rem">${t.maxLoad}</td>
+                  <td style="text-align:center;font-size:.78rem;font-weight:600;color:${dc > 0 ? 'var(--blue)' : 'var(--text-faint)'}">${dc}</td>
+                  <td>
+                    <div style="display:flex;gap:4px;justify-content:flex-end">
+                      <button class="t-remove" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:.7rem;background:var(--surface);cursor:pointer" data-edit="${t.id}">✏️</button>
+                      <button class="t-remove" data-id="${t.id}">
+                        <svg viewBox="0 0 16 16" fill="none" width="13" height="13"><path d="M3 4h10M6 4V2.5h4V4M5.5 4l.5 9M10.5 4l-.5 9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>`}
+      </div>
+    </details>`).join('');
 
   container.querySelectorAll('[data-edit]').forEach(btn => {
     btn.addEventListener('click', () => openTeacherModal(btn.dataset.edit));
@@ -1975,11 +2072,14 @@ function autoDistribute() {
     let tIdx = 0;
     for (let pi = 0; pi < PAIR_NUMS.length && tIdx < shuffled.length; pi++) {
       const pairN   = PAIR_NUMS[pi];
-      // Случайный размер слота (но не 0 пока есть учителя)
       const remaining = shuffled.length - tIdx;
       const pairsLeft = PAIR_NUMS.length - pi;
-      const minSlot = Math.max(1, Math.floor(remaining / pairsLeft / 1.5));
-      const maxSlot = Math.min(maxTeachersPerPair, Math.ceil(remaining / pairsLeft * 1.8));
+      let minSlot = Math.max(1, Math.floor(remaining / pairsLeft / 1.5));
+      let maxSlot = Math.min(maxTeachersPerPair, Math.ceil(remaining / pairsLeft * 1.8));
+      // Пара 6: значительно меньше преподавателей (0–1)
+      if (pairN === 6) { minSlot = 0; maxSlot = Math.min(1, remaining); }
+      // Пара 5: чуть меньше обычного
+      if (pairN === 5) { maxSlot = Math.min(maxSlot, Math.ceil(maxTeachersPerPair * 0.6)); }
       const slotSize = minSlot + Math.floor(Math.random() * (maxSlot - minSlot + 1));
 
       for (let s = 0; s < slotSize && tIdx < shuffled.length; s++, tIdx++) {
@@ -1991,24 +2091,26 @@ function autoDistribute() {
       }
     }
 
-    // ── ШАГ 2: Дежурный — тот кто стоит на 1-й паре (или 2-й), max 2/месяц ──
-    const pair1Teachers = State.lessons[key][1] || [];
-    const pair2Teachers = State.lessons[key][2] || [];
-
-    // Ищем кандидата из пары 1, потом пары 2
-    const dutyPool = [...pair1Teachers, ...pair2Teachers];
+    // ── Дежурный из пары 1/2 того же корпуса что активный, max 2/месяц ──
+    const pair1 = State.lessons[key][1] || [];
+    const pair2 = State.lessons[key][2] || [];
+    const dutyPool = [...pair1, ...pair2];
     let dutyTeacher = null;
 
-    for (const entry of dutyPool) {
-      const t = teacherById(entry.tid);
-      if (!t) continue;
-      if (blackoutCheck(t)) continue;
-      if (monthCounts[t.id] >= 2) continue;  // max 2 дежурства в месяц
-      dutyTeacher = t;
-      break;
+    for (const b of ['1','2','3']) {
+      for (const entry of dutyPool) {
+        const t = teacherById(entry.tid);
+        if (!t) continue;
+        if (blackoutCheck(t)) continue;
+        if (monthCounts[t.id] >= 2) continue;
+        if ((t.building || '1') !== b) continue;
+        dutyTeacher = t;
+        break;
+      }
+      if (dutyTeacher) break;
     }
 
-    // Fallback: если никто из пар 1/2 не подходит — берём любого
+    // Fallback
     if (!dutyTeacher) {
       dutyTeacher = State.teachers
         .filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
@@ -2149,6 +2251,9 @@ function init() {
   const addBtn = document.getElementById('addTeacherBtn');
   if (addBtn) addBtn.addEventListener('click', addTeacher);
 
+  // Initialize inline dept manager in add-teacher form
+  renderInlineDeptManager(_inlineDepts);
+
   const phoneInput = document.getElementById('teacherPhone');
   if (phoneInput) phoneInput.addEventListener('input', () => {
     phoneInput.value = formatPhone(phoneInput.value);
@@ -2277,12 +2382,14 @@ function init() {
   const wOverlay = document.getElementById('welcomeModalOverlay');
   // welcomeModalOverlay — клик вне карточки НЕ закрывает (обязательный выбор роли)
 
-  // ★ Building filter
-  const bfSel = document.getElementById('buildingFilter');
-  if (bfSel) bfSel.addEventListener('change', () => {
-    State.activeBuilding = bfSel.value;
-    renderCalendar();
-    renderAccordion();
+  // ★ Building tab buttons (1/2/3 корпус)
+  document.querySelectorAll('.building-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      State.activeBuilding = btn.dataset.building;
+      _syncBuildingTabs(btn.dataset.building);
+      renderCalendar();
+      renderAccordion();
+    });
   });
   if (wOverlay) wOverlay.addEventListener('click', e => e.stopPropagation());
 

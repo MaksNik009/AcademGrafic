@@ -203,15 +203,11 @@
             <svg viewBox="0 0 20 20" fill="none" width="18" height="18"><path d="M7.5 5l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
-        <!-- ★ Building filter -->
-        <div class="select-wrap building-filter-wrap" style="min-width:130px">
-          <select class="field-input field-select building-filter-sel" id="buildingFilter" style="height:34px;font-size:.82rem;border-radius:20px;padding:0 30px 0 12px">
-            <option value="all">Все корпуса</option>
-            <option value="1">1 корпус</option>
-            <option value="2">2 корпус</option>
-            <option value="3">3 корпус</option>
-          </select>
-          <svg class="select-arrow" viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <!-- ★ Building tabs (1/2/3 корпус, no 'all') -->
+        <div class="building-tabs" role="group" aria-label="Корпус">
+          <button class="building-tab active" data-building="1">1 корпус</button>
+          <button class="building-tab" data-building="2">2 корпус</button>
+          <button class="building-tab" data-building="3">3 корпус</button>
         </div>
         <div class="legend">
           <span class="legend-item"><span class="legend-dot legend-dot--assigned" aria-hidden="true"></span>Назначен</span>
@@ -277,29 +273,9 @@
             </div>
 
             <div class="field-group">
-              <label class="field-label" for="teacherDept">Кафедра <span class="required" aria-hidden="true">*</span></label>
-              <div style="display:flex;gap:6px;align-items:flex-start">
-                <div class="select-wrap" style="flex:1">
-                  <select class="field-input field-select" id="teacherDept" aria-required="true">
-                    <option value="">— выберите —</option>
-                    <option>Кафедра информатики и ВТ</option>
-                    <option>Кафедра математики</option>
-                    <option>Кафедра физики</option>
-                    <option>Кафедра химии и биологии</option>
-                    <option>Кафедра истории и обществознания</option>
-                    <option>Кафедра русского языка и литературы</option>
-                    <option>Кафедра иностранных языков</option>
-                    <option>Кафедра физической культуры</option>
-                    <option>Кафедра экономики и права</option>
-                    <option>Кафедра психологии и педагогики</option>
-                  </select>
-                  <svg class="select-arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true" width="14" height="14">
-                    <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </div>
-              </div>
-              <input class="field-input field-input--sm" type="text" id="teacherDeptCustom"
-                     placeholder="или введите свою кафедру…"/>
+              <label class="field-label">Кафедры <span class="required" aria-hidden="true">*</span></label>
+              <!-- Multi-dept manager — filled by JS just like editor -->
+              <div id="inlineDeptsSection"></div>
             </div>
 
             <div class="field-group">
