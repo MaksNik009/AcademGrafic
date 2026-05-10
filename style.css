@@ -740,9 +740,14 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 }
 .blackout-indicator {
   font-family: var(--font-mono); font-size: .58rem;
-  color: var(--blackout-text); background: var(--blackout-bg);
-  border: 1px solid var(--blackout-border);
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
   padding: 1px 5px; border-radius: 3px; width: fit-content;
+}
+
+.templates-panel .select-wrap {
+  min-width: 250px;
 }
 
 /* orange chip-action hover */
@@ -1594,10 +1599,10 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
 }
 .cell-strip { width: 3px; height: 100%; }
 .cell-strip--lesson { background: var(--green); }   /* зелёный — работа */
-.cell-strip--duty   { background: var(--blue); }    /* синий — дежурство */
+.cell-strip--duty   { background: var(--purple); }    /* фиолетовый — дежурство */
 
 .cell--teacher-active { background: var(--green-light) !important; }      /* фон только работа */
-.cell--teacher-duty   { background: var(--blue-light) !important; }       /* фон дежурство (перекрывает) */
+.cell--teacher-duty { background: rgba(142,68,173,0.14) !important; box-shadow: inset 0 0 0 1px rgba(142,68,173,0.35); }       /* фон дежурство (перекрывает) */
 .day-cell { position: relative; overflow: hidden; }
 
 /* ══════════════════════════════════════════════════

@@ -1713,8 +1713,52 @@ async function autoDistribute(useActiveTemplate = true) {
     }
   }
   State.save();
-  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
-  showToast(`Распределение для ${State.activeBuilding} корпуса: ${workdays.length} дней`, 'success');
+    // ─── СОХРАНЕНИЕ В SUPABASE ─────────────────────────────────────────
+  await deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
+  await deleteLessonsMonthForBuilding(y, m, State.activeBuilding);
+
+  const scheduleRows = [];
+  for (const [key, val] of Object.entries(State.duties)) {
+    if (!key.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)) continue;
+    for (const e of val) {
+      if (e.building === State.activeBuilding) {
+        scheduleRows.push({
+          date_key: key,
+          teacher_id: e.tid,
+          dept: e.dept || '',
+          replace_request: State.replaceRequests[key] || false,
+          building: e.building
+        });
+      }
+    }
+  }
+  if (scheduleRows.length) await saveScheduleBatch(scheduleRows);
+
+  const lessonRows = [];
+  for (const [key, lessons] of Object.entries(State.lessons)) {
+    if (!key.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)) continue;
+    for (const [pn, arr] of Object.entries(lessons)) {
+      for (const e of arr) {
+        if (e.building === State.activeBuilding) {
+          lessonRows.push({
+            date_key: key,
+            pair_num: pn,
+            teacher_id: e.tid,
+            dept: e.dept || '',
+            room: e.room || '',
+            building: e.building
+          });
+        }
+      }
+    }
+  }
+  if (lessonRows.length) {
+    const chunkSize = 500;
+    for (let i = 0; i < lessonRows.length; i += chunkSize) {
+      await sb.from('lessons').insert(lessonRows.slice(i, i + chunkSize));
+    }
+  }
+  showToast(`Распределение для ${State.activeBuilding} корпуса сохранено в облако`, 'success');
 }
 function clearAll() {
   if (!confirm('Очистить все назначенные дежурства текущего месяца?')) return;
@@ -1821,8 +1865,25 @@ async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts 
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
 async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
 async function saveScheduleRemoveOne(key, teacherId) { if (!sb) return; await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId); }
-async function saveScheduleBatch(rows) { if (!sb || !rows.length) return; await sb.from('schedule').upsert(rows, { onConflict: 'date_key,teacher_id,dept' }); }
-async function deleteScheduleMonth(year, month, building = null) { if (!sb) return; const prefix = `${year}-${String(month + 1).padStart(2, '0')}`; const from = `${prefix}-01`; const to = `${prefix}-32`; if (building) { await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to).eq('building', building); } else { await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to); } }
+async function saveScheduleBatch(rows) {
+  if (!sb || !rows.length) return;
+  // rows должны содержать поле building
+  await sb.from('schedule').upsert(rows, { onConflict: 'date_key,teacher_id,dept' });
+}
+async function deleteScheduleMonthForBuilding(year, month, building) {
+  if (!sb) return;
+  const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const from = `${prefix}-01`;
+  const to = `${prefix}-32`;
+  await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to).eq('building', building);
+}
+async function deleteLessonsMonthForBuilding(year, month, building) {
+  if (!sb) return;
+  const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const from = `${prefix}-01`;
+  const to = `${prefix}-32`;
+  await sb.from('lessons').delete().gte('date_key', from).lte('date_key', to).eq('building', building);
+}
 async function loadLessons() { if (!sb) return; const y = State.currentDate.getFullYear(); const m = State.currentDate.getMonth(); const prefix = `${y}-${String(m+1).padStart(2,'0')}`; const { data, error } = await sb.from('lessons').select('date_key, pair_num, teacher_id, dept, room, building').like('date_key', prefix + '%'); if (error) { console.warn('[SB] loadLessons error:', error.message); return; } Object.keys(State.lessons).forEach(k => { if (k.startsWith(prefix)) delete State.lessons[k]; }); (data || []).forEach(r => { if (!State.lessons[r.date_key]) State.lessons[r.date_key] = {}; const pn = r.pair_num; if (!State.lessons[r.date_key][pn]) State.lessons[r.date_key][pn] = []; State.lessons[r.date_key][pn].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); }
 async function saveLessonsBatch(key, lessons) { if (!sb) return; await sb.from('lessons').delete().eq('date_key', key); const rows = []; [1,2,3,4,5,6].forEach(pn => { (lessons[pn] || []).forEach(e => { rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '', building: e.building || State.activeBuilding }); }); }); if (rows.length) await sb.from('lessons').insert(rows); }
 function subscribeRealtime() { if (!sb || sbChannel) return; sbChannel = sb.channel('ag-realtime-v6').on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange).on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, onTeacherChange).on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, onLessonsChange).subscribe(status => { if (status === 'SUBSCRIBED') setSbStatus('connected', 'подключено · Realtime ⚡'); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { setSbStatus('error', 'Realtime: ошибка канала'); setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000); } else if (status === 'CLOSED') { sbChannel = null; setSbStatus('error', 'Realtime: канал закрыт'); } }); }
@@ -1974,7 +2035,12 @@ function init() {
   document.getElementById('notifClearAll').addEventListener('click', () => { State.notifications = []; State.save(); renderNotifications(); });
   document.getElementById('addBlackoutBtn').addEventListener('click', addBlackoutDate);
   const sbClose = document.getElementById('sbStatusClose'); if (sbClose) sbClose.addEventListener('click', () => { document.getElementById('sbStatusbar').classList.add('hidden'); });
-  document.querySelectorAll('.building-tab').forEach(btn => { btn.addEventListener('click', () => { State.activeBuilding = btn.dataset.building; _syncBuildingTabs(btn.dataset.building); if (State.currentRole === 'admin') loadTemplatesList(); renderCalendar(); renderAccordion(); }); });
+  document.querySelectorAll('.building-tab').forEach(btn => { btn.addEventListener('click', () => { State.activeBuilding = btn.dataset.building; _syncBuildingTabs(btn.dataset.building); if (State.currentRole === 'admin') {
+  await loadSchedule();
+  await loadLessons();
+  renderCalendar();
+  renderAccordion();
+}); });
   const dpClose = document.getElementById('dayPanelClose'); if (dpClose) dpClose.addEventListener('click', closeDayPanel);
   const dpBackdrop = document.getElementById('dayPanelBackdrop'); if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
   const wOverlay = document.getElementById('welcomeModalOverlay'); if (wOverlay) wOverlay.addEventListener('click', e => e.stopPropagation());
