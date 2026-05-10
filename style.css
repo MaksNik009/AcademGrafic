@@ -1843,11 +1843,35 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   color: var(--text-muted);
 }
 
-/* Кнопка «Сохранить как шаблон» остаётся справа от селектора, 
-   но если нужно, чтобы она была в той же строке, можно добавить:
-.templates-panel .card-header {
-  display: flex;
-  justify-content: space-between;
+/* Принудительная горизонтальная раскладка для строки шаблонов */
+.templates-panel .card-body > div {
+  display: flex !important;
+  flex-direction: row !important;
   align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
 }
-*/
+/* Селектор занимает минимальную ширину */
+.templates-panel .field-group {
+  flex: 1 1 auto;
+  min-width: 260px;
+  margin: 0;
+}
+/* Список шаблонов занимает оставшееся место и прижимается вправо */
+.templates-list {
+  flex: 2 1 auto;
+  min-width: 200px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  text-align: center;
+  margin: 0;
+}
+/* Текст внутри серого блока */
+.templates-list > div {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
