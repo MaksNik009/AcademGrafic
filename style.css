@@ -1801,35 +1801,53 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
 }
+/* Блок шаблонов — горизонтальное расположение */
 .templates-panel .card-body {
-  padding: 1.25rem !important;
-  gap: 1.25rem;
-  background: var(--surface);
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
 }
-/* Список шаблонов (серая область) */
-.templates-list {
-  min-height: 70px;
-  padding: 0.75rem 1rem;
-  background: var(--surface-2);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+
+/* Контейнер с селектором (левая часть) */
+.templates-panel .field-group {
+  flex: 1 1 auto;
+  min-width: 260px;
   margin: 0;
 }
-/* Текст "Нет шаблонов" */
+
+/* Селектор */
+#templateSelect {
+  width: 100%;
+  min-width: 260px;
+}
+
+/* Список шаблонов / сообщение "Нет шаблонов" (правая часть) */
+.templates-list {
+  flex: 2 1 auto;
+  min-width: 200px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  text-align: center;
+  margin: 0;
+}
+
+/* Если список пуст, текст выравниваем по центру */
 .templates-list > div {
   font-size: 0.85rem;
   color: var(--text-muted);
-  text-align: center;
-  line-height: 1.4;
 }
-/* Селектор шаблонов */
-.templates-panel .field-group {
-  margin-bottom: 0;
+
+/* Кнопка «Сохранить как шаблон» остаётся справа от селектора, 
+   но если нужно, чтобы она была в той же строке, можно добавить:
+.templates-panel .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
-#templateSelect {
-  min-width: 280px;
-  padding: 0.5rem;
-}
-.templates-panel {
-  margin-bottom: 2rem;
-}
+*/
