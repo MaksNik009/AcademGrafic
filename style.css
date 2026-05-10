@@ -746,9 +746,34 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   padding: 1px 5px; border-radius: 3px; width: fit-content;
 }
 
-.templates-panel .select-wrap {
-  min-width: 250px;
+.templates-panel .card {
+  width: 100%;
+  max-width: none;
 }
+
+/* Расширяем контейнер выбора шаблона */
+.templates-panel .select-wrap {
+  min-width: 260px;
+  width: auto;
+}
+#templateSelect {
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Всему блоку шаблонов даём больше места */
+.templates-panel .card-body {
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.templates-list {
+  flex: 2;
+  min-width: 200px;
+}
+
 
 /* orange chip-action hover */
 .chip-action-btn.orange:hover { background: rgba(230,126,34,.7); }
