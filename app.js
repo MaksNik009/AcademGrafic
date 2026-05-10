@@ -1,9 +1,9 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   АКАДЕМГРАФИК — app.js v6 (полный, исправленный)
-   Цвета: дежурный — синий (#4A90D9), работа — зелёный (#27AE60),
-          нежелательный — фиолетовый (#8E44AD)
-   Корпуса независимы, авто-распределение по родному корпусу,
-   шаблоны с увеличенным селектом.
+   АКАДЕМГРАФИК — app.js v6 (исправленная)
+   Цвета: дежурный (фон/полоска в teacher mode) — фиолетовый (#8E44AD),
+          нежелательный — красный (#C0392B)
+   Корпуса независимы: удаление/сохранение только для текущего building,
+   авто-распределение не затирает другие корпуса.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 // ─── ГОСУДАРСТВЕННЫЕ ПРАЗДНИКИ РФ ────────────────────────────────────────────
@@ -565,7 +565,6 @@ function renderAccordion() {
     acc.appendChild(weekEl);
   });
 }
-
 // ─── MODAL (Assignment) ───────────────────────────────────────────────────────
 function openModal(key, day, month, year, mode = 'assign') {
   State.selectedCell = key;
@@ -1580,8 +1579,7 @@ function addBlackoutDate() {
   renderMyCabinet(); renderCalendar(); renderAccordion();
   showToast('Нежелательная дата добавлена', 'success');
 }
-
-// ─── AUTO-DISTRIBUTION (с поддержкой шаблонов) ───────────────────────────────
+// ─── AUTO-DISTRIBUTION (с поддержкой шаблонов, без затирания других корпусов) ──
 async function applyTemplate(templateId) {
   if (!sb) { showToast('Supabase не подключён', 'error'); return; }
   const { data, error } = await sb.from('templates').select('*').eq('id', templateId).single();
@@ -1592,7 +1590,7 @@ async function applyTemplate(templateId) {
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
-  // Очищаем текущий месяц для текущего корпуса
+  // Удаляем только записи текущего корпуса (не трогаем другие корпуса)
   for (const [key, val] of Object.entries(State.duties)) {
     if (key.startsWith(prefix)) {
       State.duties[key] = val.filter(e => e.building !== State.activeBuilding);
@@ -1608,7 +1606,7 @@ async function applyTemplate(templateId) {
       if (Object.keys(State.lessons[key]).length === 0) delete State.lessons[key];
     }
   }
-  // Загружаем из шаблона
+  // Загружаем из шаблона (с указанием building = текущий корпус)
   for (const [dayKey, dutyList] of Object.entries(dutiesObj)) {
     if (dayKey.startsWith(prefix)) {
       State.duties[dayKey] = dutyList.map(d => ({ tid: d.tid, dept: d.dept || null, building: State.activeBuilding }));
@@ -1639,7 +1637,7 @@ async function autoDistribute(useActiveTemplate = true) {
     const dow = new Date(y, m, d).getDay();
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
-  // Очищаем дежурства и пары текущего корпуса
+  // Удаляем только дежурства и пары текущего корпуса (не трогаем другие корпуса)
   for (const wd of workdays) {
     const dutyEntries = getDutyEntries(wd);
     for (const e of dutyEntries) removeDuty(wd, e.tid, e.dept);
@@ -1824,7 +1822,7 @@ async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedul
 async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
 async function saveScheduleRemoveOne(key, teacherId) { if (!sb) return; await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId); }
 async function saveScheduleBatch(rows) { if (!sb || !rows.length) return; await sb.from('schedule').upsert(rows, { onConflict: 'date_key,teacher_id,dept' }); }
-async function deleteScheduleMonth(year, month) { if (!sb) return; const prefix = `${year}-${String(month + 1).padStart(2, '0')}`; const from = `${prefix}-01`; const to = `${prefix}-32`; await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to); }
+async function deleteScheduleMonth(year, month, building = null) { if (!sb) return; const prefix = `${year}-${String(month + 1).padStart(2, '0')}`; const from = `${prefix}-01`; const to = `${prefix}-32`; if (building) { await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to).eq('building', building); } else { await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to); } }
 async function loadLessons() { if (!sb) return; const y = State.currentDate.getFullYear(); const m = State.currentDate.getMonth(); const prefix = `${y}-${String(m+1).padStart(2,'0')}`; const { data, error } = await sb.from('lessons').select('date_key, pair_num, teacher_id, dept, room, building').like('date_key', prefix + '%'); if (error) { console.warn('[SB] loadLessons error:', error.message); return; } Object.keys(State.lessons).forEach(k => { if (k.startsWith(prefix)) delete State.lessons[k]; }); (data || []).forEach(r => { if (!State.lessons[r.date_key]) State.lessons[r.date_key] = {}; const pn = r.pair_num; if (!State.lessons[r.date_key][pn]) State.lessons[r.date_key][pn] = []; State.lessons[r.date_key][pn].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); }
 async function saveLessonsBatch(key, lessons) { if (!sb) return; await sb.from('lessons').delete().eq('date_key', key); const rows = []; [1,2,3,4,5,6].forEach(pn => { (lessons[pn] || []).forEach(e => { rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '', building: e.building || State.activeBuilding }); }); }); if (rows.length) await sb.from('lessons').insert(rows); }
 function subscribeRealtime() { if (!sb || sbChannel) return; sbChannel = sb.channel('ag-realtime-v6').on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange).on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, onTeacherChange).on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, onLessonsChange).subscribe(status => { if (status === 'SUBSCRIBED') setSbStatus('connected', 'подключено · Realtime ⚡'); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { setSbStatus('error', 'Realtime: ошибка канала'); setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000); } else if (status === 'CLOSED') { sbChannel = null; setSbStatus('error', 'Realtime: канал закрыт'); } }); }
