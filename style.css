@@ -1796,3 +1796,27 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   padding: 12px 16px;
   font-size: .8rem; color: var(--text-faint); font-style: italic;
 }
+/* Расширяем блок шаблонов */
+.templates-panel .field-group {
+  min-width: 280px;
+  flex: 2;
+}
+#templateSelect {
+  width: 100%;
+  min-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.templates-panel .select-wrap {
+  width: 100%;
+  min-width: 260px;
+}
+.templates-panel .card-body {
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.templates-list {
+  flex: 3;
+  min-width: 200px;
+}
