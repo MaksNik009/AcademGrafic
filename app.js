@@ -2035,12 +2035,21 @@ function init() {
   document.getElementById('notifClearAll').addEventListener('click', () => { State.notifications = []; State.save(); renderNotifications(); });
   document.getElementById('addBlackoutBtn').addEventListener('click', addBlackoutDate);
   const sbClose = document.getElementById('sbStatusClose'); if (sbClose) sbClose.addEventListener('click', () => { document.getElementById('sbStatusbar').classList.add('hidden'); });
-  document.querySelectorAll('.building-tab').forEach(btn => { btn.addEventListener('click', () => { State.activeBuilding = btn.dataset.building; _syncBuildingTabs(btn.dataset.building); if (State.currentRole === 'admin') {
-  await loadSchedule();
-  await loadLessons();
-  renderCalendar();
-  renderAccordion();
-}); });
+  document.querySelectorAll('.building-tab').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    State.activeBuilding = btn.dataset.building;
+    _syncBuildingTabs(btn.dataset.building);
+    if (State.currentRole === 'admin') {
+      await loadSchedule();
+      await loadLessons();
+      renderCalendar();
+      renderAccordion();
+    } else {
+      renderCalendar();
+      renderAccordion();
+    }
+  });
+  });
   const dpClose = document.getElementById('dayPanelClose'); if (dpClose) dpClose.addEventListener('click', closeDayPanel);
   const dpBackdrop = document.getElementById('dayPanelBackdrop'); if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
   const wOverlay = document.getElementById('welcomeModalOverlay'); if (wOverlay) wOverlay.addEventListener('click', e => e.stopPropagation());
