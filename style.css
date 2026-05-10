@@ -1875,3 +1875,106 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   font-size: 0.85rem;
   color: var(--text-muted);
 }
+/* ── Стили для тегов шаблонов (чипсы) ── */
+.template-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 30px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-xs);
+  white-space: nowrap;
+}
+.template-tag:hover {
+  background: var(--blue-light);
+  border-color: var(--blue);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.template-tag.active {
+  background: var(--blue);
+  border-color: var(--blue-dark);
+  color: white;
+}
+.template-tag.active .template-remove {
+  color: rgba(255,255,255,0.8);
+}
+.template-tag.active .template-remove:hover {
+  color: white;
+  background: rgba(255,255,255,0.2);
+}
+.template-remove {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  margin-left: 4px;
+  border-radius: 50%;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+.template-remove:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+  transform: scale(1.1);
+}
+/* Улучшаем отображение списка шаблонов */
+.templates-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  min-height: 52px;
+  border: 1px solid var(--border);
+}
+/* Сообщение "Нет шаблонов" */
+.templates-list > div {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+  width: 100%;
+}
+/* Отступы для самого блока */
+.templates-panel {
+  margin-top: 1.5rem;
+}
+.templates-panel .card-body {
+  padding: 1rem 1.2rem;
+}
+/* Селектор и кнопка в одной строке */
+.templates-panel .card-body > div {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+.templates-panel .field-group {
+  flex: 1 1 auto;
+  min-width: 240px;
+  margin: 0;
+}
+#templateSelect {
+  width: 100%;
+  padding: 0.5rem;
+  height: auto;
+}
