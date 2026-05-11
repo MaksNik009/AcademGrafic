@@ -749,12 +749,23 @@ function renderDayPanel(key) {
   const dayName = DAYS_FULL[dateObj.getDay()];
   const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
   const isHoliday = !!getHolidayName(key);
+  const isSunday  = dateObj.getDay() === 0;
   const dutyEntries = getDutyEntries(key);
   const isAdmin = State.currentRole === 'admin';
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
+
+  // Баннер: воскресенье (синий) или праздник (жёлтый) — всегда вверху
+  let bannerHtml = '';
+  if (isSunday && !isHoliday) {
+    bannerHtml = `<div class="day-panel-sunday">📅 Воскресенье (выходной)</div>`;
+  } else if (isHoliday) {
+    bannerHtml = `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
+  }
+
   if (dutyEntries.length > 0) {
-    dutyStrip.innerHTML = `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
+    dutyStrip.innerHTML = bannerHtml +
+      `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
       dutyEntries.map(e => {
         const t = teacherById(e.tid);
@@ -769,10 +780,11 @@ function renderDayPanel(key) {
       `</div>` +
       (isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>` : '');
   } else {
-    dutyStrip.innerHTML = isHoliday
-      ? `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`
-      : `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>
-         ${isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>` : ''}`;
+    dutyStrip.innerHTML = bannerHtml +
+      (isHoliday || isSunday
+        ? ''
+        : `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>
+           ${isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>` : ''}`);
   }
   const pairsEl = panel.querySelector('.day-panel-pairs');
   pairsEl.innerHTML = PAIRS.map(p => {
