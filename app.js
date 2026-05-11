@@ -302,20 +302,32 @@ function renderCalendar() {
     grid.appendChild(blank);
   }
   for (let d = 1; d <= lastDay.getDate(); d++) {
-    const key = dateKey(y, m, d);
-    const dow = new Date(y, m, d).getDay();
-    const isSunday = dow === 0;
-    const isSaturday = dow === 6;
-    const isHoliday = !!getHolidayName(key);
-    const isToday = key === today;
-    const isPast = key < today;
-    const isReplaceReq = !!State.replaceRequests[key];
-    const tid = State.currentTeacherId;
-    const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
-    const cell = document.createElement('div');
-    cell.className = 'day-cell';
+  const key = dateKey(y, m, d);
+  const dow = new Date(y, m, d).getDay();
+  const isSunday = dow === 0;
+  const isSaturday = dow === 6;
+  const isHoliday = !!getHolidayName(key);
+  const isToday = key === today;
+  const isPast = key < today;
+  const isReplaceReq = !!State.replaceRequests[key];
+  const tid = State.currentTeacherId;
+  const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
+  
+  const cell = document.createElement('div');
+  cell.className = 'day-cell';
+  
+    // --- ВОСКРЕСЕНЬЕ (админ может кликать) ---
     if (isSunday) {
       cell.classList.add('day-cell--sunday');
+      if (State.currentRole === 'admin') {
+        cell.style.cursor = 'pointer';
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('tabindex', '0');
+      } else {
+        cell.setAttribute('data-role-disabled', 'true');
+        cell.style.cursor = 'not-allowed';
+        cell.style.pointerEvents = 'none';
+      }
       const sunNum = document.createElement('div'); sunNum.className='day-num'; sunNum.textContent=d;
       cell.appendChild(sunNum);
       const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
@@ -324,15 +336,7 @@ function renderCalendar() {
       continue;
     }
     
-    if (State.currentRole === 'admin') {
-      if (dutyEntries.length > 0) {
-        // отображаем чипы
-      } else {
-        const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
-        cell.appendChild(hint);
-      }
-    }
-
+    // --- ПРАЗДНИКИ (админ может назначать) ---
     if (isHoliday) {
       cell.classList.add('day-cell--holiday');
       if (State.currentRole !== 'admin') {
@@ -342,10 +346,10 @@ function renderCalendar() {
         cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
       }
     }
+    
     if (isSaturday) cell.classList.add('day-cell--saturday');
     if (isToday)    cell.classList.add('day-cell--today');
     if (isPast)     cell.classList.add('day-cell--past');
-    if (isHoliday)  cell.classList.add('day-cell--holiday');
     if (myBlackout) cell.classList.add('day-cell--blackout');
     if (isReplaceReq) cell.classList.add('day-cell--replace-req');
     cell.dataset.key = key;
@@ -353,6 +357,8 @@ function renderCalendar() {
       cell.setAttribute('role', 'button');
       cell.setAttribute('tabindex', '0');
     }
+    
+    // Номер дня
     const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
     cell.appendChild(num);
     if (isHoliday) {
@@ -363,6 +369,8 @@ function renderCalendar() {
       const bi = document.createElement('div'); bi.className='blackout-indicator'; bi.textContent='🚫 нежелательный';
       cell.appendChild(bi);
     }
+    
+    // *** ВАЖНО: объявляем переменные ПЕРЕД ИСПОЛЬЗОВАНИЕМ ***
     const dutyEntries = getDutyEntries(key);
     const pairTeacherIds = new Set();
     if (State.lessons[key]) {
@@ -372,46 +380,51 @@ function renderCalendar() {
         });
       }
     }
-    if (!isHoliday) {
-      if (State.currentRole === 'teacher') {
-        const hasLesson = pairTeacherIds.has(State.currentTeacherId);
-        const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
-        if (hasLesson || isDuty) {
-          cell.classList.add('cell--teacher-active');
-          if (isDuty) cell.classList.add('cell--teacher-duty');
-          const stripWrap = document.createElement('div'); stripWrap.className='cell-strips';
-          if (hasLesson) {
-            const s = document.createElement('div'); s.className='cell-strip cell-strip--lesson'; stripWrap.appendChild(s);
-          }
-          if (isDuty) {
-            const s = document.createElement('div'); s.className='cell-strip cell-strip--duty'; stripWrap.appendChild(s);
-          }
-          cell.appendChild(stripWrap);
+    
+    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник, потому что учитель не должен видеть дежурства в праздник) ──
+    if (!isHoliday && State.currentRole === 'teacher') {
+      const hasLesson = pairTeacherIds.has(State.currentTeacherId);
+      const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
+      if (hasLesson || isDuty) {
+        cell.classList.add('cell--teacher-active');
+        if (isDuty) cell.classList.add('cell--teacher-duty');
+        const stripWrap = document.createElement('div'); stripWrap.className='cell-strips';
+        if (hasLesson) {
+          const s = document.createElement('div'); s.className='cell-strip cell-strip--lesson'; stripWrap.appendChild(s);
         }
-      } else {
-        if (dutyEntries.length > 0) {
-          const first = dutyEntries[0];
-          const t = teacherById(first.tid);
-          if (t) {
-            const color = getColor(teacherIndex(first.tid));
-            const chip = document.createElement('div'); chip.className='cell-duty-chip';
-            const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
-            av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(first.tid); });
-            const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
-            chip.appendChild(av); chip.appendChild(nameEl);
-            cell.appendChild(chip);
-            if (dutyEntries.length > 1) {
-              const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
-              cell.appendChild(more);
-            }
-          }
-        } else if (State.currentRole === 'admin') {
-          const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
-          cell.appendChild(hint);
+        if (isDuty) {
+          const s = document.createElement('div'); s.className='cell-strip cell-strip--duty'; stripWrap.appendChild(s);
         }
+        cell.appendChild(stripWrap);
       }
     }
-    if (!isHoliday) {
+    
+    // ── РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник) ──
+    if (State.currentRole === 'admin') {
+      if (dutyEntries.length > 0) {
+        const first = dutyEntries[0];
+        const t = teacherById(first.tid);
+        if (t) {
+          const color = getColor(teacherIndex(first.tid));
+          const chip = document.createElement('div'); chip.className='cell-duty-chip';
+          const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
+          av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(first.tid); });
+          const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
+          chip.appendChild(av); chip.appendChild(nameEl);
+          cell.appendChild(chip);
+          if (dutyEntries.length > 1) {
+            const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
+            cell.appendChild(more);
+          }
+        }
+      } else {
+        const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
+        cell.appendChild(hint);
+      }
+    }
+    
+    // Обработчики кликов
+    if (!isHoliday || State.currentRole === 'admin') {
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
