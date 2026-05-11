@@ -760,6 +760,7 @@ function renderDayPanel(key) {
   if (!panel) return;
   const [y, mm, dd] = key.split('-').map(Number);
   const dateObj = new Date(y, mm - 1, dd);
+  const isSunday = dateObj.getDay() === 0;
   const dayName = DAYS_FULL[dateObj.getDay()];
   const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
   const isHoliday = !!getHolidayName(key);
@@ -769,6 +770,15 @@ function renderDayPanel(key) {
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
   let dutyHtml = '';
+
+  // ★ Показываем уведомление для воскресенья (если не праздник)
+  if (isSunday && !isHoliday) {
+    dutyHtml += `<div class="day-panel-holiday">📅 Воскресенье (выходной)</div>`;
+  }
+  // Показываем праздник (если есть)
+  if (isHoliday) {
+    dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
+  }
 
   // ВСЕГДА показываем праздник, если он есть
   if (isHoliday) {
@@ -1364,13 +1374,10 @@ function saveTeacherModal() {
       Object.assign(t, { name, dept, depts, phone, maxLoad, building });
       State.blackoutDates[editId] = [...(_modalBlackouts || [])];
       t.blackoutDates = State.blackoutDates[editId];
+      // ★ Добавить обновление в Supabase
+      if (sb) saveTeachers(t);
     }
     showToast('Данные обновлены', 'success');
-  } else {
-    const newId = 't_' + Date.now();
-    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] });
-    State.blackoutDates[newId] = [...(_modalBlackouts || [])];
-    showToast(`${name} добавлен(а)`, 'success');
   }
   _modalBlackouts = [];
   _modalDepts = [];
@@ -1436,8 +1443,12 @@ function addTeacher() {
   if (!name) { showToast('Введите ФИО преподавателя', 'error'); document.getElementById('teacherName').focus(); return; }
   if (!depts.length) { showToast('Добавьте хотя бы одну кафедру', 'error'); return; }
   const newId = 't_' + Date.now();
-  State.teachers.push({ id: newId, name, dept: depts[0], depts, phone, maxLoad, building, blackoutDates: [] });
+  const newTeacher = { id: newId, name, dept: depts[0], depts, phone, maxLoad, building, blackoutDates: [] };
+  State.teachers.push(newTeacher);
   State.save();
+  // ★ Добавить сохранение в Supabase
+  if (sb) saveTeachers(newTeacher);
+  
   document.getElementById('teacherName').value = '';
   if (document.getElementById('teacherPhone')) document.getElementById('teacherPhone').value = '';
   if (document.getElementById('teacherLoad')) document.getElementById('teacherLoad').value = '2';
