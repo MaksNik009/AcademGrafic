@@ -1066,10 +1066,13 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 /* Sunday cells: #dfedf5 background, clearly blocked */
 .day-cell--sunday {
   background: #dfedf5 !important;
-  pointer-events: none !important;
+  /* pointer-events: none; убираем */
+  cursor: pointer;
+}
+/* Но для режима преподавателя воскресенье всё же должно быть заблокировано. Добавим класс, который установит JS, если роль не admin */
+.day-cell--sunday[data-role-disabled="true"] {
+  pointer-events: none;
   cursor: not-allowed;
-  display: flex !important;
-  opacity: 1;
 }
 /* Цифра дня — такой же цвет как у обычных дней */
 .day-cell--sunday .day-num {

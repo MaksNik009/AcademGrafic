@@ -323,10 +323,24 @@ function renderCalendar() {
       grid.appendChild(cell);
       continue;
     }
+    
+    if (State.currentRole === 'admin') {
+      if (dutyEntries.length > 0) {
+        // отображаем чипы
+      } else {
+        const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
+        cell.appendChild(hint);
+      }
+    }
+
     if (isHoliday) {
-      cell.classList.add('day-cell--holiday', 'disabled');
-      cell.setAttribute('title', getHolidayName(key) || 'Праздничный день');
-      cell.style.pointerEvents = 'none';
+      cell.classList.add('day-cell--holiday');
+      if (State.currentRole !== 'admin') {
+        cell.setAttribute('title', getHolidayName(key) || 'Праздничный день');
+        cell.style.pointerEvents = 'none';
+      } else {
+        cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
+      }
     }
     if (isSaturday) cell.classList.add('day-cell--saturday');
     if (isToday)    cell.classList.add('day-cell--today');
@@ -1128,6 +1142,48 @@ function renderDeptManager(selected) {
   });
 }
 
+
+// ─── CONFIRM MODAL ──────────────────────────────────────────────
+function showConfirmDialog(title, message, onConfirm, onCancel) {
+  const modal = document.getElementById('confirmModal');
+  const titleEl = document.getElementById('confirmModalTitle');
+  const bodyEl = document.getElementById('confirmModalBody');
+  const closeBtn = document.getElementById('confirmModalClose');
+  const cancelBtn = document.getElementById('confirmModalCancel');
+  const okBtn = document.getElementById('confirmModalOk');
+
+  titleEl.textContent = title;
+  bodyEl.innerHTML = `<p>${message}</p>`;
+
+  const closeHandler = () => {
+    modal.classList.remove('open');
+    if (onCancel && typeof onCancel === 'function') onCancel();
+    cleanup();
+  };
+  const okHandler = () => {
+    modal.classList.remove('open');
+    if (onConfirm && typeof onConfirm === 'function') onConfirm();
+    cleanup();
+  };
+  const cancelHandler = () => {
+    modal.classList.remove('open');
+    if (onCancel && typeof onCancel === 'function') onCancel();
+    cleanup();
+  };
+  const cleanup = () => {
+    closeBtn.removeEventListener('click', closeHandler);
+    cancelBtn.removeEventListener('click', cancelHandler);
+    okBtn.removeEventListener('click', okHandler);
+  };
+
+  closeBtn.addEventListener('click', closeHandler);
+  cancelBtn.addEventListener('click', cancelHandler);
+  okBtn.addEventListener('click', okHandler);
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
 // ─── TEACHER INFO POPUP ───────────────────────────────────────────────────────
 function openTeacherInfoModal(tid) {
   const t = teacherById(tid);
@@ -1895,8 +1951,14 @@ function flashCell(key) { const cell = document.querySelector(`.day-cell[data-ke
 // ─── TEMPLATES FUNCTIONS ────────────────────────────────────────────────────
 async function saveTemplate() {
   if (State.currentRole !== 'admin') { showToast('Только завуч может создавать шаблоны', 'error'); return; }
-  const templateName = prompt('Введите название шаблона:');
-  if (!templateName) return;
+  const templateName = document.getElementById('newTemplateName').value.trim();
+  if (!templateName) {
+    showToast('Введите название шаблона', 'error');
+    const input = document.getElementById('newTemplateName');
+    input.style.borderColor = 'var(--danger)';
+    setTimeout(() => input.style.borderColor = '', 1000);
+    return;
+  }
   const building = State.activeBuilding;
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
@@ -1920,15 +1982,26 @@ async function saveTemplate() {
   if (!sb) { showToast('Supabase не доступен', 'error'); return; }
   const { data: existing } = await sb.from('templates').select('id').eq('name', templateName).eq('building', building);
   if (existing && existing.length) {
-    if (!confirm(`Шаблон «${templateName}» уже существует. Перезаписать?`)) return;
-    await sb.from('templates').update({ duties_json: dutiesSnapshot, lessons_json: lessonsSnapshot, created_at: new Date() }).eq('id', existing[0].id);
-    showToast(`Шаблон «${templateName}» обновлён`, 'success');
+    showConfirmDialog(
+      'Перезаписать шаблон?',
+      `Шаблон с именем «${templateName}» уже существует в этом корпусе. Перезаписать?`,
+      async () => {
+        await sb.from('templates').update({ duties_json: dutiesSnapshot, lessons_json: lessonsSnapshot, created_at: new Date() }).eq('id', existing[0].id);
+        showToast(`Шаблон «${templateName}» обновлён`, 'success');
+        loadTemplatesList();
+        document.getElementById('newTemplateName').value = '';
+      },
+      () => { showToast('Перезапись отменена', 'info'); }
+    );
   } else {
     const { error } = await sb.from('templates').insert({ name: templateName, building, duties_json: dutiesSnapshot, lessons_json: lessonsSnapshot });
     if (error) showToast('Ошибка сохранения шаблона', 'error');
-    else showToast(`Шаблон «${templateName}» сохранён`, 'success');
+    else {
+      showToast(`Шаблон «${templateName}» сохранён`, 'success');
+      document.getElementById('newTemplateName').value = '';
+      loadTemplatesList();
+    }
   }
-  loadTemplatesList();
 }
 async function loadTemplatesList() { if (!sb) { renderTemplatesList([]); return; } const { data, error } = await sb.from('templates').select('*').eq('building', State.activeBuilding).order('name'); if (error) { console.warn(error); renderTemplatesList([]); return; } renderTemplatesList(data || []); }
 function renderTemplatesList(templates = null) {
@@ -1970,12 +2043,17 @@ function renderTemplatesList(templates = null) {
       delBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const tid = delBtn.dataset.id;
-        if (confirm('Удалить шаблон?')) {
-          if (sb) await sb.from('templates').delete().eq('id', tid);
-          if (State.activeTemplateId === tid) State.activeTemplateId = null;
-          loadTemplatesList();
-          showToast('Шаблон удалён', 'info');
-        }
+        const templateName = tag.querySelector('span').textContent;
+        showConfirmDialog(
+          'Удаление шаблона',
+          `Вы действительно хотите удалить шаблон «${templateName}»? Это действие нельзя отменить.`,
+          async () => {
+            if (sb) await sb.from('templates').delete().eq('id', tid);
+            if (State.activeTemplateId === tid) State.activeTemplateId = null;
+            loadTemplatesList();
+            showToast('Шаблон удалён', 'info');
+          }
+        );
       });
     }
   });
