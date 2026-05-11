@@ -153,16 +153,24 @@ function addDuty(key, tid, dept = null, building = State.activeBuilding) {
   if (!already) {
     entries.push({ tid, dept: dept || null, building });
     State.duties[key] = entries;
+    State.save();
+    if (sb) saveSchedule(key, tid, false, dept || null, building);
   }
 }
 function removeDuty(key, tid, dept = null) {
   const entries = getDutyEntries(key).filter(e => !(e.tid === tid && (dept === null || e.dept === dept)));
   if (entries.length) State.duties[key] = entries;
   else delete State.duties[key];
+  State.save();
+  if (sb) saveScheduleRemoveOne(key, tid, State.activeBuilding);
 }
 function clearDutyDay(key) {
   delete State.duties[key];
   delete State.replaceRequests[key];
+  State.save();
+  if (sb) {
+    sb.from('schedule').delete().eq('date_key', key).eq('building', State.activeBuilding);
+  }
 }
 function weekDutiesCount(tid, weekKeys) {
   let cnt = 0;
@@ -493,11 +501,13 @@ function toggleReplaceRequest(key) {
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
+    if (sb) saveSchedule(key, teacher.id, false, null, State.activeBuilding);
     State.save();
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
     State.replaceRequests[key] = true;
+    if (sb) saveSchedule(key, teacher.id, true, null, State.activeBuilding);
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
@@ -806,7 +816,7 @@ function renderDayPanel(key) {
       }).join('') +
       `</div>` +
       (isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>` : '');
-    } else {
+  } else {
     let emptyMessage = `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
     if (isAdmin) {
       emptyMessage += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
@@ -1913,6 +1923,12 @@ async function autoDistribute(useActiveTemplate = true) {
   } finally {
     await new Promise(r => setTimeout(r, 2500));
     _suppressRealtimeRender = false;
+    // Мигание обновлённых ячеек
+    const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+    const updatedDays = [...workdays, ...Object.keys(State.duties).filter(k => k.startsWith(prefix))];
+    updatedDays.forEach(day => {
+      setTimeout(() => flashCell(day), 100);
+    });
   }
 }
 function clearAll() {
