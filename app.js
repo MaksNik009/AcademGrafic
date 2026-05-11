@@ -1709,15 +1709,8 @@ async function applyTemplate(templateId) {
   showToast(`Шаблон «${data.name}» загружен`, 'success');
 }
 async function autoDistribute(useActiveTemplate = true) {
-  if (State.teachers.length === 0) {
-    showToast('Добавьте хотя бы одного преподавателя', 'error');
-    return;
-  }
-  if (useActiveTemplate && State.activeTemplateId) {
-    await applyTemplate(State.activeTemplateId);
-    return;
-  }
-
+  if (State.teachers.length === 0) { showToast('Добавьте хотя бы одного преподавателя', 'error'); return; }
+  if (useActiveTemplate && State.activeTemplateId) { await applyTemplate(State.activeTemplateId); return; }
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const total = new Date(y, m + 1, 0).getDate();
@@ -1728,8 +1721,7 @@ async function autoDistribute(useActiveTemplate = true) {
     const dow = new Date(y, m, d).getDay();
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
-
-  // 1. Удаляем старые дежурства и пары ТОЛЬКО для текущего корпуса
+  // Удаляем только дежурства и пары текущего корпуса (не трогаем другие корпуса)
   for (const wd of workdays) {
     const dutyEntries = getDutyEntries(wd);
     for (const e of dutyEntries) removeDuty(wd, e.tid, e.dept);
@@ -1743,24 +1735,10 @@ async function autoDistribute(useActiveTemplate = true) {
       if (Object.keys(State.lessons[wd]).length === 0) delete State.lessons[wd];
     }
   }
-
-  // 2. Подготовка
-  const weekCounts = {};
-  const monthCounts = {};
-  const pairCounts = {};
-  State.teachers.forEach(t => {
-    weekCounts[t.id] = {};
-    monthCounts[t.id] = 0;
-    pairCounts[t.id] = 0;
-  });
-
+  const weekCounts = {}; const monthCounts = {}; const pairCounts = {};
+  State.teachers.forEach(t => { weekCounts[t.id] = {}; monthCounts[t.id] = 0; pairCounts[t.id] = 0; });
   const buildingTeachers = State.teachers.filter(t => (t.building || '1') === State.activeBuilding);
-  if (buildingTeachers.length === 0) {
-    showToast(`Нет преподавателей в ${State.activeBuilding} корпусе`, 'error');
-    return;
-  }
-
-  // 3. Распределяем пары и дежурных
+  if (buildingTeachers.length === 0) { showToast(`Нет преподавателей в ${State.activeBuilding} корпусе`, 'error'); return; }
   for (const key of workdays) {
     const weekKeys = getWeekKeys(key);
     const weekId = weekKeys[0];
@@ -1768,16 +1746,13 @@ async function autoDistribute(useActiveTemplate = true) {
       const bl = [...(t.blackoutDates || []), ...(State.blackoutDates[t.id] || [])];
       return bl.includes(key);
     };
-
     if (!State.lessons[key]) State.lessons[key] = {};
     for (let pn = 1; pn <= 6; pn++) State.lessons[key][pn] = [];
-
-    let shuffled = [...buildingTeachers].filter(t => !blackoutCheck(t));
+    const shuffled = [...buildingTeachers].filter(t => !blackoutCheck(t));
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
-
     const maxTeachersPerPair = Math.max(2, Math.ceil(shuffled.length / 6));
     let tIdx = 0;
     for (let pi = 0; pi < 6 && tIdx < shuffled.length; pi++) {
@@ -1786,10 +1761,7 @@ async function autoDistribute(useActiveTemplate = true) {
       const pairsLeft = 6 - pi;
       let minSlot = Math.max(1, Math.floor(remaining / pairsLeft / 1.5));
       let maxSlot = Math.min(maxTeachersPerPair, Math.ceil(remaining / pairsLeft * 1.8));
-      if (pairN === 6) {
-        minSlot = 0;
-        maxSlot = Math.min(1, remaining);
-      }
+      if (pairN === 6) { minSlot = 0; maxSlot = Math.min(1, remaining); }
       if (pairN === 5) maxSlot = Math.min(maxSlot, Math.ceil(maxTeachersPerPair * 0.6));
       const slotSize = minSlot + Math.floor(Math.random() * (maxSlot - minSlot + 1));
       for (let s = 0; s < slotSize && tIdx < shuffled.length; s++, tIdx++) {
@@ -1800,7 +1772,6 @@ async function autoDistribute(useActiveTemplate = true) {
         pairCounts[t.id]++;
       }
     }
-
     const pair1 = State.lessons[key][1] || [];
     const pair2 = State.lessons[key][2] || [];
     const dutyPool = [...pair1, ...pair2];
@@ -1815,8 +1786,7 @@ async function autoDistribute(useActiveTemplate = true) {
       break;
     }
     if (!dutyTeacher) {
-      dutyTeacher = buildingTeachers
-        .filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
+      dutyTeacher = buildingTeachers.filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
         .sort((a, b) => monthCounts[a.id] - monthCounts[b.id])[0] || buildingTeachers[0];
     }
     if (dutyTeacher) {
@@ -1826,15 +1796,14 @@ async function autoDistribute(useActiveTemplate = true) {
       monthCounts[dutyTeacher.id]++;
     }
   }
-
   State.save();
-  renderCalendar();
-  renderAccordion();
-  renderTeachersList();
-  renderStats();
-  renderMyCabinet();
+  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
 
-  // 4. Сохранение в Supabase с подавлением Realtime
+  // ─── СОХРАНЕНИЕ В SUPABASE ─────────────────────────────────────────
+  // Подавляем Realtime ДО батчевых операций:
+  // DELETE-события → onScheduleChange → removeDuty → стирает распределение
+  // INSERT-события → onScheduleChange → addDuty(dept='') ≠ addDuty(dept='Кафедра…') → дубликаты
+  // + 500+ renderCalendar() подряд = лихорадка
   _suppressRealtimeRender = true;
   try {
     await deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
@@ -1883,7 +1852,7 @@ async function autoDistribute(useActiveTemplate = true) {
     }
     showToast(`Распределение для ${State.activeBuilding} корпуса сохранено в облако`, 'success');
   } finally {
-    // Даём время долететь уже отправленным Realtime‑событиям
+    // Ждём, пока все уже летящие Realtime-события долетят и будут отброшены
     await new Promise(r => setTimeout(r, 2500));
     _suppressRealtimeRender = false;
   }
