@@ -373,8 +373,8 @@ function renderCalendar() {
       }
     }
     
-    // -------- РЕЖИМ УЧИТЕЛЯ ----------
-    if (!isHoliday && State.currentRole === 'teacher') {
+    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник и не воскресенье) ──
+    if (State.currentRole === 'teacher' && !isHoliday && !isSunday) {
       const hasLesson = pairTeacherIds.has(State.currentTeacherId);
       const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
       if (hasLesson || isDuty) {
@@ -390,8 +390,8 @@ function renderCalendar() {
         cell.appendChild(stripWrap);
       }
     }
-    
-    // -------- РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник/воскресенье) ----------
+
+    // ── РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник/воскресенье) ──
     if (State.currentRole === 'admin') {
       if (dutyEntries.length > 0) {
         const first = dutyEntries[0];
@@ -409,25 +409,20 @@ function renderCalendar() {
             cell.appendChild(more);
           }
         }
-      } else if (!isSunday) { // для воскресенья тоже показываем подсказку, но она может быть лишней
+      } else {
         const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
         cell.appendChild(hint);
       }
     }
     
-    // -------- ОБРАБОТЧИКИ КЛИКОВ ----------
-    // Для учителя: только не праздничные дни
+    // ── ОБРАБОТЧИКИ КЛИКОВ ──
+    // Для учителя: только обычные рабочие дни (не праздник, не воскресенье)
     if (State.currentRole === 'teacher' && !isHoliday && !isSunday) {
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
-    // Для администратора: всегда (кроме воскресенья? воскресенье тоже можно, но у него уже есть обработчик, если role=button)
-    if (State.currentRole === 'admin' && !isSunday) {
-      cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
-      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
-    }
-    // Для воскресенья у администратора обработчик уже есть (через role=button), но нужно добавить явно, чтобы открывалась панель
-    if (State.currentRole === 'admin' && isSunday) {
+    // Для администратора: любые дни (включая воскресенье и праздники)
+    if (State.currentRole === 'admin') {
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
@@ -757,8 +752,15 @@ function renderDayPanel(key) {
   const isAdmin = State.currentRole === 'admin';
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
+  const isAdmin = State.currentRole === 'admin';
+  let dutyHtml = '';
+
+  if (isHoliday && isAdmin) {
+    dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
+  }
+
   if (dutyEntries.length > 0) {
-    dutyStrip.innerHTML = `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
+    dutyHtml += `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
       dutyEntries.map(e => {
         const t = teacherById(e.tid);
@@ -769,15 +771,18 @@ function renderDayPanel(key) {
           <span style="font-size:.75rem;font-weight:500;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</span>
           ${isAdmin ? `<button onclick="event.stopPropagation();removeDutyFromPanel('${key}','${e.tid}','${e.dept||''}')" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:.8rem;padding:0 0 0 2px" title="Убрать">✕</button>` : ''}
         </div>`;
-      }).join('') +
-      `</div>` +
-      (isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>` : '');
+      }).join('') + `</div>`;
+    if (isAdmin) {
+      dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>`;
+    }
+  } else if (isHoliday && !isAdmin) {
+    dutyHtml = `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
   } else {
-    dutyStrip.innerHTML = isHoliday
-      ? `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`
-      : `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>
-         ${isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>` : ''}`;
+    dutyHtml = `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
+    if (isAdmin) dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
   }
+
+  dutyStrip.innerHTML = dutyHtml;
   const pairsEl = panel.querySelector('.day-panel-pairs');
   pairsEl.innerHTML = PAIRS.map(p => {
     const entries = getPairEntries(key, p.n);
@@ -2171,20 +2176,20 @@ function init() {
   document.getElementById('addBlackoutBtn').addEventListener('click', addBlackoutDate);
   const sbClose = document.getElementById('sbStatusClose'); if (sbClose) sbClose.addEventListener('click', () => { document.getElementById('sbStatusbar').classList.add('hidden'); });
   document.querySelectorAll('.building-tab').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    State.activeBuilding = btn.dataset.building;
-    _syncBuildingTabs(btn.dataset.building);
-    if (State.currentRole === 'admin') {
-      await loadSchedule();
-      await loadLessons();
-      await loadTemplatesList();
-      renderCalendar();
-      renderAccordion();
-    } else {
-      renderCalendar();
-      renderAccordion();
-    }
-  });
+    btn.addEventListener('click', async () => {
+      State.activeBuilding = btn.dataset.building;
+      _syncBuildingTabs(btn.dataset.building);
+      if (State.currentRole === 'admin') {
+        await loadSchedule();
+        await loadLessons();
+        await loadTemplatesList();  
+        renderCalendar();
+        renderAccordion();
+      } else {
+        renderCalendar();
+        renderAccordion();
+      }
+    });
   });
   const dpClose = document.getElementById('dayPanelClose'); if (dpClose) dpClose.addEventListener('click', closeDayPanel);
   const dpBackdrop = document.getElementById('dayPanelBackdrop'); if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);

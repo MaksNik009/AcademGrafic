@@ -1998,3 +1998,18 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   height: 42px; /* такая же высота как у field-input */
   padding: 0 1rem;
 }
+/* Выравнивание поля ввода названия шаблона и кнопки */
+.templates-panel .card-body > div:last-child {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.templates-panel .field-group {
+  flex: 2 1 auto;
+}
+#saveTemplateBtn {
+  height: 42px;
+  padding: 0 1rem;
+  white-space: nowrap;
+}
