@@ -749,11 +749,11 @@ function renderDayPanel(key) {
   const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
   const isHoliday = !!getHolidayName(key);
   const dutyEntries = getDutyEntries(key);
-  const isAdmin = State.currentRole === 'admin';
+  const isAdmin = State.currentRole === 'admin';          // ← оставляем эту
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
-  const isAdmin = State.currentRole === 'admin';
   let dutyHtml = '';
+
 
   if (isHoliday && isAdmin) {
     dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
