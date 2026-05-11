@@ -1981,3 +1981,20 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   padding: 0.5rem;
   height: auto;
 }
+
+.templates-panel .card-body > div:last-child {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.templates-panel .field-group {
+  flex: 2 1 auto;
+  min-width: 200px;
+}
+#saveTemplateBtn {
+  flex: 0 0 auto;
+  height: 42px; /* такая же высота как у field-input */
+  padding: 0 1rem;
+}

@@ -302,21 +302,22 @@ function renderCalendar() {
     grid.appendChild(blank);
   }
   for (let d = 1; d <= lastDay.getDate(); d++) {
-  const key = dateKey(y, m, d);
-  const dow = new Date(y, m, d).getDay();
-  const isSunday = dow === 0;
-  const isSaturday = dow === 6;
-  const isHoliday = !!getHolidayName(key);
-  const isToday = key === today;
-  const isPast = key < today;
-  const isReplaceReq = !!State.replaceRequests[key];
-  const tid = State.currentTeacherId;
-  const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
-  
-  const cell = document.createElement('div');
-  cell.className = 'day-cell';
-  
-    // --- ВОСКРЕСЕНЬЕ (админ может кликать) ---
+    const key = dateKey(y, m, d);
+    const dow = new Date(y, m, d).getDay();
+    const isSunday = dow === 0;
+    const isSaturday = dow === 6;
+    const isHoliday = !!getHolidayName(key);
+    const isToday = key === today;
+    const isPast = key < today;
+    const isReplaceReq = !!State.replaceRequests[key];
+    const tid = State.currentTeacherId;
+    const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
+    
+    const cell = document.createElement('div');
+    cell.className = 'day-cell';
+    cell.dataset.key = key;
+    
+    // -------- БАЗОВЫЕ КЛАССЫ ----------
     if (isSunday) {
       cell.classList.add('day-cell--sunday');
       if (State.currentRole === 'admin') {
@@ -328,15 +329,7 @@ function renderCalendar() {
         cell.style.cursor = 'not-allowed';
         cell.style.pointerEvents = 'none';
       }
-      const sunNum = document.createElement('div'); sunNum.className='day-num'; sunNum.textContent=d;
-      cell.appendChild(sunNum);
-      const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
-      cell.appendChild(sunLabel);
-      grid.appendChild(cell);
-      continue;
     }
-    
-    // --- ПРАЗДНИКИ (админ может назначать) ---
     if (isHoliday) {
       cell.classList.add('day-cell--holiday');
       if (State.currentRole !== 'admin') {
@@ -346,22 +339,21 @@ function renderCalendar() {
         cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
       }
     }
-    
     if (isSaturday) cell.classList.add('day-cell--saturday');
     if (isToday)    cell.classList.add('day-cell--today');
     if (isPast)     cell.classList.add('day-cell--past');
     if (myBlackout) cell.classList.add('day-cell--blackout');
     if (isReplaceReq) cell.classList.add('day-cell--replace-req');
-    cell.dataset.key = key;
-    if (!isHoliday) {
-      cell.setAttribute('role', 'button');
-      cell.setAttribute('tabindex', '0');
-    }
     
-    // Номер дня
+    // -------- НОМЕР ДНЯ ----------
     const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
     cell.appendChild(num);
-    if (isHoliday) {
+    
+    // -------- МЕТКИ (для воскресенья и праздников) ----------
+    if (isSunday) {
+      const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
+      cell.appendChild(sunLabel);
+    } else if (isHoliday) {
       const hl = document.createElement('div'); hl.className='holiday-label'; hl.textContent=getHolidayName(key);
       cell.appendChild(hl);
     }
@@ -370,7 +362,7 @@ function renderCalendar() {
       cell.appendChild(bi);
     }
     
-    // *** ВАЖНО: объявляем переменные ПЕРЕД ИСПОЛЬЗОВАНИЕМ ***
+    // -------- ПОЛУЧАЕМ ДЕЖУРНЫХ И ПАРЫ ----------
     const dutyEntries = getDutyEntries(key);
     const pairTeacherIds = new Set();
     if (State.lessons[key]) {
@@ -381,7 +373,7 @@ function renderCalendar() {
       }
     }
     
-    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник, потому что учитель не должен видеть дежурства в праздник) ──
+    // -------- РЕЖИМ УЧИТЕЛЯ ----------
     if (!isHoliday && State.currentRole === 'teacher') {
       const hasLesson = pairTeacherIds.has(State.currentTeacherId);
       const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
@@ -399,7 +391,7 @@ function renderCalendar() {
       }
     }
     
-    // ── РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник) ──
+    // -------- РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник/воскресенье) ----------
     if (State.currentRole === 'admin') {
       if (dutyEntries.length > 0) {
         const first = dutyEntries[0];
@@ -417,17 +409,29 @@ function renderCalendar() {
             cell.appendChild(more);
           }
         }
-      } else {
+      } else if (!isSunday) { // для воскресенья тоже показываем подсказку, но она может быть лишней
         const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
         cell.appendChild(hint);
       }
     }
     
-    // Обработчики кликов
-    if (!isHoliday || State.currentRole === 'admin') {
+    // -------- ОБРАБОТЧИКИ КЛИКОВ ----------
+    // Для учителя: только не праздничные дни
+    if (State.currentRole === 'teacher' && !isHoliday && !isSunday) {
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
+    // Для администратора: всегда (кроме воскресенья? воскресенье тоже можно, но у него уже есть обработчик, если role=button)
+    if (State.currentRole === 'admin' && !isSunday) {
+      cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
+    }
+    // Для воскресенья у администратора обработчик уже есть (через role=button), но нужно добавить явно, чтобы открывалась панель
+    if (State.currentRole === 'admin' && isSunday) {
+      cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
+    }
+    
     grid.appendChild(cell);
   }
 }
@@ -2173,6 +2177,7 @@ function init() {
     if (State.currentRole === 'admin') {
       await loadSchedule();
       await loadLessons();
+      await loadTemplatesList();
       renderCalendar();
       renderAccordion();
     } else {
