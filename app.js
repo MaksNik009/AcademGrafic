@@ -806,12 +806,12 @@ function renderDayPanel(key) {
       }).join('') +
       `</div>` +
       (isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>` : '');
-  } else {
-    dutyStrip.innerHTML = bannerHtml +
-      (isHoliday || isSunday
-        ? ''
-        : `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>
-           ${isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>` : ''}`);
+    } else {
+    let emptyMessage = `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
+    if (isAdmin) {
+      emptyMessage += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
+    }
+    dutyStrip.innerHTML = bannerHtml + emptyMessage;
   }
   const pairsEl = panel.querySelector('.day-panel-pairs');
   pairsEl.innerHTML = PAIRS.map(p => {
