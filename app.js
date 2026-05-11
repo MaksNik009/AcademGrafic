@@ -153,16 +153,29 @@ function addDuty(key, tid, dept = null, building = State.activeBuilding) {
   if (!already) {
     entries.push({ tid, dept: dept || null, building });
     State.duties[key] = entries;
+    State.save();
+    // ★ Сохраняем в Supabase
+    if (sb) saveSchedule(key, tid, false, dept || null, building);
   }
 }
 function removeDuty(key, tid, dept = null) {
   const entries = getDutyEntries(key).filter(e => !(e.tid === tid && (dept === null || e.dept === dept)));
   if (entries.length) State.duties[key] = entries;
   else delete State.duties[key];
+  State.save();
+  // ★ Удаляем из Supabase, указывая building
+  if (sb) saveScheduleRemoveOne(key, tid, State.activeBuilding);
 }
 function clearDutyDay(key) {
   delete State.duties[key];
   delete State.replaceRequests[key];
+  State.save();
+  // ★ Удаляем все записи этого дня для текущего корпуса
+  if (sb) {
+    sb.from('schedule').delete().eq('date_key', key).eq('building', State.activeBuilding);
+  }
+  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
+  showToast('Дежурство снято', 'info');
 }
 function weekDutiesCount(tid, weekKeys) {
   let cnt = 0;
@@ -460,14 +473,16 @@ function toggleReplaceRequest(key) {
   if (!ids.length) return;
   const teacher = teacherById(State.currentTeacherId && ids.includes(State.currentTeacherId) ? State.currentTeacherId : ids[0]);
   const [, mm, dd] = key.split('-');
-  const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
+  const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm)-1]}`;
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
+    if (sb) saveSchedule(key, teacher.id, false, null, State.activeBuilding);
     State.save();
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
     State.replaceRequests[key] = true;
+    if (sb) saveSchedule(key, teacher.id, true, null, State.activeBuilding);
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
@@ -875,6 +890,7 @@ function addPairEntry(key, pairN) {
   entries.push({ tid, dept, room, building: State.activeBuilding });
   State.save();
   renderDayPanel(key);
+  if (sb) saveLessonsBatch(key, State.lessons[key] || {});
   showToast('Преподаватель добавлен в пару', 'success');
   saveLessonsBatch(key, State.lessons[key] || {});
 }
@@ -883,6 +899,7 @@ function removePairEntry(key, pairN, idx) {
   entries.splice(idx, 1);
   State.save();
   renderDayPanel(key);
+  if (sb) saveLessonsBatch(key, State.lessons[key] || {});
   saveLessonsBatch(key, State.lessons[key] || {});
 }
 
@@ -1846,6 +1863,11 @@ function clearAll() {
   Object.keys(State.duties).forEach(k => { if (k.startsWith(prefix)) delete State.duties[k]; });
   Object.keys(State.replaceRequests).forEach(k => { if (k.startsWith(prefix)) delete State.replaceRequests[k]; });
   State.save();
+  // ★ Очищаем Supabase для текущего корпуса
+  if (sb) {
+    deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
+    deleteLessonsMonthForBuilding(y, m, State.activeBuilding);
+  }
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
   showToast('Расписание очищено', 'info');
 }
@@ -1942,7 +1964,10 @@ function mapTeacherRow(r) { let depts = []; if (Array.isArray(r.depts) && r.dept
 async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean); const { error } = await sb.from('teachers').upsert({ id: teacher.id, name: teacher.name, dept: depts[0] || '', depts: depts, phone: teacher.phone || '', max_load: teacher.maxLoad || 2, blackout_dates: State.blackoutDates[teacher.id] || [], building: teacher.building || '1' }, { onConflict: 'id' }); if (error) console.warn('[SB] saveTeachers error:', error.message); }
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
 async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
-async function saveScheduleRemoveOne(key, teacherId) { if (!sb) return; await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId); }
+async function saveScheduleRemoveOne(key, teacherId, building) {
+  if (!sb) return;
+  await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building);
+}
 async function saveScheduleBatch(rows) {
   if (!sb || !rows.length) return;
   // rows должны содержать поле building

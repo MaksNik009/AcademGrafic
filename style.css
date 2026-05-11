@@ -1366,6 +1366,7 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   border: 1px solid var(--holiday-border);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
+  margin-bottom: 12px;
 }
 
 /* Pair blocks */
