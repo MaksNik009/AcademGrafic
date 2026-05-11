@@ -302,21 +302,22 @@ function renderCalendar() {
     grid.appendChild(blank);
   }
   for (let d = 1; d <= lastDay.getDate(); d++) {
-  const key = dateKey(y, m, d);
-  const dow = new Date(y, m, d).getDay();
-  const isSunday = dow === 0;
-  const isSaturday = dow === 6;
-  const isHoliday = !!getHolidayName(key);
-  const isToday = key === today;
-  const isPast = key < today;
-  const isReplaceReq = !!State.replaceRequests[key];
-  const tid = State.currentTeacherId;
-  const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
-  
-  const cell = document.createElement('div');
-  cell.className = 'day-cell';
-  
-    // --- ВОСКРЕСЕНЬЕ (админ может кликать) ---
+    const key = dateKey(y, m, d);
+    const dow = new Date(y, m, d).getDay();
+    const isSunday = dow === 0;
+    const isSaturday = dow === 6;
+    const isHoliday = !!getHolidayName(key);
+    const isToday = key === today;
+    const isPast = key < today;
+    const isReplaceReq = !!State.replaceRequests[key];
+    const tid = State.currentTeacherId;
+    const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
+    
+    const cell = document.createElement('div');
+    cell.className = 'day-cell';
+    cell.dataset.key = key;
+
+    // ----- ВОСКРЕСЕНЬЕ -----
     if (isSunday) {
       cell.classList.add('day-cell--sunday');
       if (State.currentRole === 'admin') {
@@ -328,15 +329,45 @@ function renderCalendar() {
         cell.style.cursor = 'not-allowed';
         cell.style.pointerEvents = 'none';
       }
-      const sunNum = document.createElement('div'); sunNum.className='day-num'; sunNum.textContent=d;
-      cell.appendChild(sunNum);
+      const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
+      cell.appendChild(num);
       const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
       cell.appendChild(sunLabel);
+      // для админа показываем дежурных или +
+      if (State.currentRole === 'admin') {
+        const dutyEntries = getDutyEntries(key);
+        if (dutyEntries.length === 0) {
+          const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
+          cell.appendChild(hint);
+        } else {
+          const first = dutyEntries[0];
+          const t = teacherById(first.tid);
+          if (t) {
+            const color = getColor(teacherIndex(first.tid));
+            const chip = document.createElement('div'); chip.className='cell-duty-chip';
+            const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
+            av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(first.tid); });
+            const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
+            chip.appendChild(av); chip.appendChild(nameEl);
+            cell.appendChild(chip);
+            if (dutyEntries.length > 1) {
+              const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
+              cell.appendChild(more);
+            }
+          }
+        }
+      }
+      // Обработчик клика для воскресенья (админ)
+      if (State.currentRole === 'admin') {
+        cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
+        cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
+      }
       grid.appendChild(cell);
-      continue;
+      continue;  // переходим к следующему дню
     }
-    
-    // --- ПРАЗДНИКИ (админ может назначать) ---
+
+    // ----- НЕ ВОСКРЕСЕНЬЕ -----
+    // ПРАЗДНИКИ
     if (isHoliday) {
       cell.classList.add('day-cell--holiday');
       if (State.currentRole !== 'admin') {
@@ -346,19 +377,18 @@ function renderCalendar() {
         cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
       }
     }
-    
+
     if (isSaturday) cell.classList.add('day-cell--saturday');
     if (isToday)    cell.classList.add('day-cell--today');
     if (isPast)     cell.classList.add('day-cell--past');
     if (myBlackout) cell.classList.add('day-cell--blackout');
     if (isReplaceReq) cell.classList.add('day-cell--replace-req');
-    cell.dataset.key = key;
+
     if (!isHoliday) {
       cell.setAttribute('role', 'button');
       cell.setAttribute('tabindex', '0');
     }
-    
-    // Номер дня
+
     const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
     cell.appendChild(num);
     if (isHoliday) {
@@ -369,8 +399,7 @@ function renderCalendar() {
       const bi = document.createElement('div'); bi.className='blackout-indicator'; bi.textContent='🚫 нежелательный';
       cell.appendChild(bi);
     }
-    
-    // *** ВАЖНО: объявляем переменные ПЕРЕД ИСПОЛЬЗОВАНИЕМ ***
+
     const dutyEntries = getDutyEntries(key);
     const pairTeacherIds = new Set();
     if (State.lessons[key]) {
@@ -380,8 +409,8 @@ function renderCalendar() {
         });
       }
     }
-    
-    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник, потому что учитель не должен видеть дежурства в праздник) ──
+
+    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник)
     if (!isHoliday && State.currentRole === 'teacher') {
       const hasLesson = pairTeacherIds.has(State.currentTeacherId);
       const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
@@ -398,8 +427,8 @@ function renderCalendar() {
         cell.appendChild(stripWrap);
       }
     }
-    
-    // ── РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник) ──
+
+    // ── РЕЖИМ АДМИНИСТРАТОРА
     if (State.currentRole === 'admin') {
       if (dutyEntries.length > 0) {
         const first = dutyEntries[0];
@@ -422,8 +451,8 @@ function renderCalendar() {
         cell.appendChild(hint);
       }
     }
-    
-    // Обработчики кликов
+
+    // Обработчики кликов (для админа – все дни, для учителя – только не праздники)
     if (!isHoliday || State.currentRole === 'admin') {
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
@@ -749,13 +778,11 @@ function renderDayPanel(key) {
   const dayName = DAYS_FULL[dateObj.getDay()];
   const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
   const isHoliday = !!getHolidayName(key);
-  const isSunday  = dateObj.getDay() === 0;
+  const isSunday = dateObj.getDay() === 0;
   const dutyEntries = getDutyEntries(key);
   const isAdmin = State.currentRole === 'admin';
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
-
-  // Баннер: воскресенье (синий) или праздник (жёлтый) — всегда вверху
   let bannerHtml = '';
   if (isSunday && !isHoliday) {
     bannerHtml = `<div class="day-panel-sunday">📅 Воскресенье (выходной)</div>`;
@@ -874,15 +901,14 @@ function addPairEntry(key, pairN) {
   const depts = Array.isArray(t?.depts) && t.depts.length ? t.depts : [t?.dept].filter(Boolean);
   const dept = (deptSel && deptSel.closest('[style*="block"]')) ? deptSel.value : (depts[0] || '');
   const room = (roomEl?.value || '').trim();
-  // Пушим напрямую в State.lessons — getPairEntries возвращает отфильтрованную копию,
-  // поэтому push в неё ничего не сохраняет в State
+  // Правильно инициализируем State.lessons[key] и State.lessons[key][pairN]
   if (!State.lessons[key]) State.lessons[key] = {};
   if (!State.lessons[key][pairN]) State.lessons[key][pairN] = [];
   State.lessons[key][pairN].push({ tid, dept, room, building: State.activeBuilding });
   State.save();
   renderDayPanel(key);
   showToast('Преподаватель добавлен в пару', 'success');
-  saveLessonsBatch(key, State.lessons[key] || {});
+  if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 function removePairEntry(key, pairN, idx) {
   const entries = getPairEntries(key, pairN);
@@ -1420,8 +1446,10 @@ function addTeacher() {
   if (!name) { showToast('Введите ФИО преподавателя', 'error'); document.getElementById('teacherName').focus(); return; }
   if (!depts.length) { showToast('Добавьте хотя бы одну кафедру', 'error'); return; }
   const newId = 't_' + Date.now();
-  State.teachers.push({ id: newId, name, dept: depts[0], depts, phone, maxLoad, building, blackoutDates: [] });
+  const newTeacher = { id: newId, name, dept: depts[0], depts, phone, maxLoad, building, blackoutDates: [] };
+  State.teachers.push(newTeacher);
   State.save();
+  if (sb) saveTeachers(newTeacher);   // ★ добавить
   document.getElementById('teacherName').value = '';
   if (document.getElementById('teacherPhone')) document.getElementById('teacherPhone').value = '';
   if (document.getElementById('teacherLoad')) document.getElementById('teacherLoad').value = '2';
@@ -1709,8 +1737,15 @@ async function applyTemplate(templateId) {
   showToast(`Шаблон «${data.name}» загружен`, 'success');
 }
 async function autoDistribute(useActiveTemplate = true) {
-  if (State.teachers.length === 0) { showToast('Добавьте хотя бы одного преподавателя', 'error'); return; }
-  if (useActiveTemplate && State.activeTemplateId) { await applyTemplate(State.activeTemplateId); return; }
+  if (State.teachers.length === 0) {
+    showToast('Добавьте хотя бы одного преподавателя', 'error');
+    return;
+  }
+  if (useActiveTemplate && State.activeTemplateId) {
+    await applyTemplate(State.activeTemplateId);
+    return;
+  }
+
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const total = new Date(y, m + 1, 0).getDate();
@@ -1721,7 +1756,8 @@ async function autoDistribute(useActiveTemplate = true) {
     const dow = new Date(y, m, d).getDay();
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
-  // Удаляем только дежурства и пары текущего корпуса (не трогаем другие корпуса)
+
+  // 1. Удаляем старые дежурства и пары ТОЛЬКО для текущего корпуса
   for (const wd of workdays) {
     const dutyEntries = getDutyEntries(wd);
     for (const e of dutyEntries) removeDuty(wd, e.tid, e.dept);
@@ -1735,10 +1771,24 @@ async function autoDistribute(useActiveTemplate = true) {
       if (Object.keys(State.lessons[wd]).length === 0) delete State.lessons[wd];
     }
   }
-  const weekCounts = {}; const monthCounts = {}; const pairCounts = {};
-  State.teachers.forEach(t => { weekCounts[t.id] = {}; monthCounts[t.id] = 0; pairCounts[t.id] = 0; });
+
+  // 2. Подготовка
+  const weekCounts = {};
+  const monthCounts = {};
+  const pairCounts = {};
+  State.teachers.forEach(t => {
+    weekCounts[t.id] = {};
+    monthCounts[t.id] = 0;
+    pairCounts[t.id] = 0;
+  });
+
   const buildingTeachers = State.teachers.filter(t => (t.building || '1') === State.activeBuilding);
-  if (buildingTeachers.length === 0) { showToast(`Нет преподавателей в ${State.activeBuilding} корпусе`, 'error'); return; }
+  if (buildingTeachers.length === 0) {
+    showToast(`Нет преподавателей в ${State.activeBuilding} корпусе`, 'error');
+    return;
+  }
+
+  // 3. Распределяем пары и дежурных
   for (const key of workdays) {
     const weekKeys = getWeekKeys(key);
     const weekId = weekKeys[0];
@@ -1746,13 +1796,16 @@ async function autoDistribute(useActiveTemplate = true) {
       const bl = [...(t.blackoutDates || []), ...(State.blackoutDates[t.id] || [])];
       return bl.includes(key);
     };
+
     if (!State.lessons[key]) State.lessons[key] = {};
     for (let pn = 1; pn <= 6; pn++) State.lessons[key][pn] = [];
-    const shuffled = [...buildingTeachers].filter(t => !blackoutCheck(t));
+
+    let shuffled = [...buildingTeachers].filter(t => !blackoutCheck(t));
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
+
     const maxTeachersPerPair = Math.max(2, Math.ceil(shuffled.length / 6));
     let tIdx = 0;
     for (let pi = 0; pi < 6 && tIdx < shuffled.length; pi++) {
@@ -1761,7 +1814,10 @@ async function autoDistribute(useActiveTemplate = true) {
       const pairsLeft = 6 - pi;
       let minSlot = Math.max(1, Math.floor(remaining / pairsLeft / 1.5));
       let maxSlot = Math.min(maxTeachersPerPair, Math.ceil(remaining / pairsLeft * 1.8));
-      if (pairN === 6) { minSlot = 0; maxSlot = Math.min(1, remaining); }
+      if (pairN === 6) {
+        minSlot = 0;
+        maxSlot = Math.min(1, remaining);
+      }
       if (pairN === 5) maxSlot = Math.min(maxSlot, Math.ceil(maxTeachersPerPair * 0.6));
       const slotSize = minSlot + Math.floor(Math.random() * (maxSlot - minSlot + 1));
       for (let s = 0; s < slotSize && tIdx < shuffled.length; s++, tIdx++) {
@@ -1772,6 +1828,7 @@ async function autoDistribute(useActiveTemplate = true) {
         pairCounts[t.id]++;
       }
     }
+
     const pair1 = State.lessons[key][1] || [];
     const pair2 = State.lessons[key][2] || [];
     const dutyPool = [...pair1, ...pair2];
@@ -1786,7 +1843,8 @@ async function autoDistribute(useActiveTemplate = true) {
       break;
     }
     if (!dutyTeacher) {
-      dutyTeacher = buildingTeachers.filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
+      dutyTeacher = buildingTeachers
+        .filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
         .sort((a, b) => monthCounts[a.id] - monthCounts[b.id])[0] || buildingTeachers[0];
     }
     if (dutyTeacher) {
@@ -1796,14 +1854,15 @@ async function autoDistribute(useActiveTemplate = true) {
       monthCounts[dutyTeacher.id]++;
     }
   }
-  State.save();
-  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
 
-  // ─── СОХРАНЕНИЕ В SUPABASE ─────────────────────────────────────────
-  // Подавляем Realtime ДО батчевых операций:
-  // DELETE-события → onScheduleChange → removeDuty → стирает распределение
-  // INSERT-события → onScheduleChange → addDuty(dept='') ≠ addDuty(dept='Кафедра…') → дубликаты
-  // + 500+ renderCalendar() подряд = лихорадка
+  State.save();
+  renderCalendar();
+  renderAccordion();
+  renderTeachersList();
+  renderStats();
+  renderMyCabinet();
+
+  // ─── СОХРАНЕНИЕ В SUPABASE С ПОДАВЛЕНИЕМ REALTIME ───
   _suppressRealtimeRender = true;
   try {
     await deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
@@ -1852,7 +1911,6 @@ async function autoDistribute(useActiveTemplate = true) {
     }
     showToast(`Распределение для ${State.activeBuilding} корпуса сохранено в облако`, 'success');
   } finally {
-    // Ждём, пока все уже летящие Realtime-события долетят и будут отброшены
     await new Promise(r => setTimeout(r, 2500));
     _suppressRealtimeRender = false;
   }
