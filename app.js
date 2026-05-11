@@ -767,23 +767,36 @@ function renderDayPanel(key) {
   const isAdmin = State.currentRole === 'admin';          // ← оставляем эту
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
-let dutyHtml = '';
+  let dutyHtml = '';
 
-// 1. Сначала всегда показываем уведомление о празднике, если он есть
-if (isHoliday) {
-  dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
-}
+  // ★ Праздничная метка (всегда, если праздник)
+  if (isHoliday) {
+    dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
+  }
 
-// 2. Потом выводим список дежурных, если они есть
-if (dutyEntries.length > 0) {
-  // ... (оставьте этот блок без изменений: он выводит список дежурных и кнопку "Добавить")
-} else if (!isHoliday) {
-  // Если нет ни праздника, ни дежурных, показываем сообщение
-  dutyHtml += `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
-  if (isAdmin) dutyHtml += `<button class="day-panel-add-btn" onclick="openModal...">+ Назначить дежурного</button>`;
-}
+  // Блок дежурных
+  if (dutyEntries.length > 0) {
+    dutyHtml += `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
+      dutyEntries.map(e => {
+        const t = teacherById(e.tid);
+        if (!t) return '';
+        const color = getColor(teacherIndex(e.tid));
+        return `<div style="display:flex;align-items:center;gap:5px;background:${color}14;border:1px solid ${color}40;border-radius:20px;padding:3px 10px 3px 4px;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">
+          <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+          <span style="font-size:.75rem;font-weight:500;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</span>
+          ${isAdmin ? `<button onclick="event.stopPropagation();removeDutyFromPanel('${key}','${e.tid}','${e.dept||''}')" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:.8rem;padding:0 0 0 2px" title="Убрать">✕</button>` : ''}
+        </div>`;
+      }).join('') + `</div>`;
+    if (isAdmin) {
+      dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>`;
+    }
+  } else if (!isHoliday) {
+    dutyHtml = `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
+    if (isAdmin) dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
+  }
 
-dutyStrip.innerHTML = dutyHtml;
+  dutyStrip.innerHTML = dutyHtml;
   const pairsEl = panel.querySelector('.day-panel-pairs');
   pairsEl.innerHTML = PAIRS.map(p => {
     const entries = getPairEntries(key, p.n);
@@ -1952,7 +1965,7 @@ async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedul
 async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) {
   if (!sb) return;
   if (teacherId) {
-    // Сначала удаляем старую запись для этого преподавателя в этот день (если она есть)
+    // Сначала удаляем старую запись (если была)
     await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building);
     // Затем вставляем новую
     await sb.from('schedule').insert({
@@ -1962,6 +1975,7 @@ async function saveSchedule(key, teacherId, replaceRequest = false, dept = null,
       replace_request: replaceRequest,
       building: building
     });
+    console.log(`✅ Сохранено: ${key} -> ${teacherId}`);
   } else {
     await sb.from('schedule').delete().eq('date_key', key);
   }
