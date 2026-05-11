@@ -764,12 +764,13 @@ function renderDayPanel(key) {
   const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
   const isHoliday = !!getHolidayName(key);
   const dutyEntries = getDutyEntries(key);
-  const isAdmin = State.currentRole === 'admin';          // ← оставляем эту
+  const isAdmin = State.currentRole === 'admin';
+
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
   let dutyHtml = '';
 
-  // ★ Праздничная метка (всегда, если праздник)
+  // ВСЕГДА показываем праздник, если он есть
   if (isHoliday) {
     dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
   }
@@ -791,9 +792,12 @@ function renderDayPanel(key) {
     if (isAdmin) {
       dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>`;
     }
-  } else if (!isHoliday) {
-    dutyHtml = `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
-    if (isAdmin) dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
+  } else {
+    // Нет дежурных
+    dutyHtml += `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
+    if (isAdmin) {
+      dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
+    }
   }
 
   dutyStrip.innerHTML = dutyHtml;
@@ -1965,13 +1969,13 @@ async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedul
 async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) {
   if (!sb) return;
   if (teacherId) {
-    // Сначала удаляем старую запись (если была)
+    // Удаляем старую запись (если была)
     await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building);
-    // Затем вставляем новую
+    // Вставляем новую, гарантируя, что dept – строка, а не null
     await sb.from('schedule').insert({
       date_key: key,
       teacher_id: teacherId,
-      dept: dept || null,
+      dept: dept || '',   // ← пустая строка вместо null
       replace_request: replaceRequest,
       building: building
     });
@@ -1986,8 +1990,20 @@ async function saveScheduleRemoveOne(key, teacherId, building) {
 }
 async function saveScheduleBatch(rows) {
   if (!sb || !rows.length) return;
-  // rows должны содержать поле building
-  await sb.from('schedule').upsert(rows, { onConflict: 'date_key,teacher_id,dept' });
+  // Каждую строку сохраняем отдельно через delete+insert
+  for (const row of rows) {
+    await sb.from('schedule').delete()
+      .eq('date_key', row.date_key)
+      .eq('teacher_id', row.teacher_id)
+      .eq('building', row.building);
+    await sb.from('schedule').insert({
+      date_key: row.date_key,
+      teacher_id: row.teacher_id,
+      dept: row.dept || '',
+      replace_request: row.replace_request || false,
+      building: row.building
+    });
+  }
 }
 async function deleteScheduleMonthForBuilding(year, month, building) {
   if (!sb) return;
