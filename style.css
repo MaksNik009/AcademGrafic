@@ -1369,6 +1369,17 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
   margin-bottom: 12px;
 }
 
+/* Воскресенье в панели дня — синий (как ячейка календаря), не жёлтый */
+.day-panel-sunday {
+  font-size: .9rem; font-weight: 600;
+  color: var(--blue);
+  background: #dfedf5;
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
 /* Pair blocks */
 .pair-block {
   border: 1px solid var(--border);

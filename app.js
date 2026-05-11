@@ -155,7 +155,7 @@ function addDuty(key, tid, dept = null, building = State.activeBuilding) {
     State.duties[key] = entries;
     State.save();
     // ★ Сохраняем в Supabase
-    if (sb) saveSchedule(key, tid, false, dept || null, building);
+    if (sb && !_batchMode) saveSchedule(key, tid, false, dept || null, building);
   }
 }
 function removeDuty(key, tid, dept = null) {
@@ -164,7 +164,7 @@ function removeDuty(key, tid, dept = null) {
   else delete State.duties[key];
   State.save();
   // ★ Удаляем из Supabase, указывая building
-  if (sb) saveScheduleRemoveOne(key, tid, State.activeBuilding);
+  if (sb && !_batchMode) saveScheduleRemoveOne(key, tid, State.activeBuilding);
 }
 function clearDutyDay(key) {
   delete State.duties[key];
@@ -773,14 +773,9 @@ function renderDayPanel(key) {
 
   // ★ Показываем уведомление для воскресенья (если не праздник)
   if (isSunday && !isHoliday) {
-    dutyHtml += `<div class="day-panel-holiday">📅 Воскресенье (выходной)</div>`;
+    dutyHtml += `<div class="day-panel-sunday">📅 Воскресенье (выходной)</div>`;
   }
   // Показываем праздник (если есть)
-  if (isHoliday) {
-    dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
-  }
-
-  // ВСЕГДА показываем праздник, если он есть
   if (isHoliday) {
     dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
   }
@@ -902,8 +897,10 @@ function addPairEntry(key, pairN) {
   const dept = (deptSel && deptSel.closest('[style*="block"]')) ? deptSel.value : (depts[0] || '');
   const room = (roomEl?.value || '').trim();
 
-  const entries = getPairEntries(key, pairN);
-  entries.push({ tid, dept, room, building: State.activeBuilding });
+  // Пушим напрямую в State.lessons (не в отфильтрованную копию!)
+  if (!State.lessons[key]) State.lessons[key] = {};
+  if (!State.lessons[key][pairN]) State.lessons[key][pairN] = [];
+  State.lessons[key][pairN].push({ tid, dept, room, building: State.activeBuilding });
   State.save();
   renderDayPanel(key);   // перерисовываем UI сразу
   // Асинхронно сохраняем в БД, но не ждём (fire-and-forget)
@@ -1764,6 +1761,12 @@ async function applyTemplate(templateId) {
 async function autoDistribute(useActiveTemplate = true) {
   if (State.teachers.length === 0) { showToast('Добавьте хотя бы одного преподавателя', 'error'); return; }
   if (useActiveTemplate && State.activeTemplateId) { await applyTemplate(State.activeTemplateId); return; }
+
+  // ── Подавляем Realtime и индивидуальные сохранения во время массовой операции ──
+  _suppressRealtimeRender = true;
+  _batchMode = true;
+
+  try {
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const total = new Date(y, m + 1, 0).getDate();
@@ -1896,6 +1899,14 @@ async function autoDistribute(useActiveTemplate = true) {
     }
   }
   showToast(`Распределение для ${State.activeBuilding} корпуса сохранено в облако`, 'success');
+
+  } finally {
+    _batchMode = false;
+    // Ждём ~2 сек, чтобы все уже летящие Realtime-события прилетели и были отброшены
+    await new Promise(r => setTimeout(r, 2000));
+    _suppressRealtimeRender = false;
+    renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
+  }
 }
 function clearAll() {
   if (!confirm('Очистить все назначенные дежурства текущего месяца?')) return;
@@ -1961,6 +1972,7 @@ let sb = null;
 let sbChannel = null;
 let sbReady = false;
 let _suppressRealtimeRender = false;
+let _batchMode = false; // во время массовых операций — пропускаем индивидуальные сохранения в Supabase
 
 function setSbStatus(state, msg) {
   const dot = document.getElementById('sbDot');
