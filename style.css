@@ -2061,3 +2061,71 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
     width: 100%;
   }
 }
+/* Блок нежелательных дат в панели дня */
+.day-panel-blackout-section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.day-panel-blackout-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+.day-panel-blackout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.blackout-teacher-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--danger);
+}
+.blackout-teacher-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.blackout-teacher-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+.blackout-teacher-dept {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+body[data-role="teacher"] .teacher-back-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: var(--radius);
+  color: rgba(255,255,255,0.8);
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+body[data-role="teacher"] .teacher-back-btn:hover {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
