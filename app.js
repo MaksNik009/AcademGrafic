@@ -827,26 +827,7 @@ function renderDayPanel(key) {
             ${isAdmin ? `<button class="pair-remove-btn" onclick="removePairEntry('${key}',${p.n},${i})" title="Удалить">✕</button>` : ''}
           </div>`;
         }).join('')
-      :
-       `<div style="font-size:.75rem;color:var(--text-faint);font-style:italic;padding:4px 0">— свободно —</div>`;
-            // Блок "Нежелательные даты преподавателей" (только если есть такие)
-      const teachersWithBlackout = State.teachers.filter(t => (State.blackoutDates[t.id] || []).includes(key));
-      if (teachersWithBlackout.length > 0) {
-        const blackoutListHtml = teachersWithBlackout.map(t => {
-          const color = getColor(teacherIndex(t.id));
-          return `<div class="blackout-teacher-item">
-            <div class="blackout-teacher-avatar" style="background:${color}">${initials(t.name)}</div>
-            <div class="blackout-teacher-name">${t.name}</div>
-            <div class="blackout-teacher-dept">${t.dept || ''}</div>
-          </div>`;
-        }).join('');
-        pairsEl.insertAdjacentHTML('beforeend', `
-          <div class="day-panel-blackout-section">
-            <div class="day-panel-blackout-title">🚫 Нежелательные даты преподавателей</div>
-            <div class="day-panel-blackout-list">${blackoutListHtml}</div>
-          </div>
-        `);
-      }
+      : `<div style="font-size:.75rem;color:var(--text-faint);font-style:italic;padding:4px 0">— свободно —</div>`;
     return `<details class="pair-block" ${validEntries.length ? 'open' : ''}>
       <summary class="pair-summary">
         <span class="pair-num">Пара ${p.n}</span>
@@ -2283,21 +2264,6 @@ async function seedDemoData() {
 function init() {
   State.load();
   initTabs();
-  document.getElementById('teacherBackBtn').addEventListener('click', () => {
-  // Сбрасываем состояние
-  State.currentRole = 'admin';
-  State.currentTeacherId = null;
-  // Показываем модал выбора роли
-  showWelcomeModal('choose');
-  // Перерисовываем (чтобы кнопка исчезла и вернулся стандартный вид)
-  renderCalendar();
-  renderAccordion();
-  renderTeachersList();
-  renderStats();
-  renderMyCabinet();
-  // Можно также закрыть открытые панели
-  closeDayPanel();
-});
   document.getElementById('prevMonth').addEventListener('click', async () => { State.currentDate.setMonth(State.currentDate.getMonth() - 1); closeDayPanel(); renderCalendar(); renderAccordion(); if (sb) { await loadSchedule(); await loadLessons(); renderCalendar(); renderAccordion(); } });
   document.getElementById('nextMonth').addEventListener('click', async () => { State.currentDate.setMonth(State.currentDate.getMonth() + 1); closeDayPanel(); renderCalendar(); renderAccordion(); if (sb) { await loadSchedule(); await loadLessons(); renderCalendar(); renderAccordion(); } });
   document.getElementById('modalClose').addEventListener('click', () => closeModal('modalOverlay'));
