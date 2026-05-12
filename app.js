@@ -2278,6 +2278,7 @@ function init() {
     if (State.currentRole === 'admin') {
       await loadSchedule();
       await loadLessons();
+      await loadTemplatesList();
       renderCalendar();
       renderAccordion();
     } else {
