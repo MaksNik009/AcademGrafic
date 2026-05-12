@@ -71,34 +71,11 @@ const State = {
   ],
 
   save() {
-    try {
-      localStorage.setItem('ag_replace',   JSON.stringify(this.replaceRequests));
-      localStorage.setItem('ag_blackout',  JSON.stringify(this.blackoutDates));
-      localStorage.setItem('ag_notifs',    JSON.stringify(this.notifications));
-      localStorage.setItem('ag_lessons',   JSON.stringify(this.lessons));
-      localStorage.setItem('ag_templateByBuilding', JSON.stringify(this.activeTemplateByBuilding));
-    } catch(e) { console.warn('Cache save failed', e); }
+    // Все данные хранятся в Supabase — localStorage не используется
   },
 
   load() {
-    try {
-      const r = localStorage.getItem('ag_replace');
-      const b = localStorage.getItem('ag_blackout');
-      const n = localStorage.getItem('ag_notifs');
-      const l = localStorage.getItem('ag_lessons');
-      if (r) this.replaceRequests = JSON.parse(r);
-      if (b) this.blackoutDates   = JSON.parse(b);
-      if (n) this.notifications   = JSON.parse(n);
-      if (l) this.lessons         = JSON.parse(l);
-      const tbb = localStorage.getItem('ag_templateByBuilding');
-      if (tbb) {
-        this.activeTemplateByBuilding = JSON.parse(tbb);
-      } else {
-        // миграция со старого единого ключа
-        const at = localStorage.getItem('ag_activeTemplate');
-        if (at && at !== 'null') this.activeTemplateByBuilding['1'] = at;
-      }
-    } catch(e) { console.warn('Cache load failed', e); }
+    // Все данные загружаются из Supabase — localStorage не используется
   }
 };
 
@@ -1162,9 +1139,9 @@ const DEFAULT_DEPTS = [
   'Кафедра психологии и педагогики',
 ];
 function loadGlobalDepts() {
-  try { const d = localStorage.getItem('ag_depts'); return d ? JSON.parse(d) : [...DEFAULT_DEPTS]; } catch { return [...DEFAULT_DEPTS]; }
+  return [...DEFAULT_DEPTS];
 }
-function saveGlobalDepts(depts) { try { localStorage.setItem('ag_depts', JSON.stringify(depts)); } catch {} }
+function saveGlobalDepts(depts) { globalDepts = depts; }
 let globalDepts = loadGlobalDepts();
 let _modalDepts = [];
 function renderDeptManager(selected) {
