@@ -184,7 +184,7 @@ body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
 .legend-dot--free     { background: var(--surface-3); border: 1px solid var(--border-dark); }
 .legend-dot--holiday  { background: #F0A500; }
 .legend-dot--replace  { background: var(--warning); }
-.legend-dot--blackout { background: var(--purple); } /* фиолетовый */
+.legend-dot--blackout{ background: var(--blackout-border); }
 
 .calendar-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-md); }
 .weekday-header { display: grid; grid-template-columns: repeat(7, 1fr); background: var(--navy); }
@@ -617,10 +617,11 @@ body { font-family: var(--font-body); font-size: 1rem; line-height: 1.6;
   --holiday-text:   #856404;
   --replace-bg:     #FEF0E7;
   --replace-border: #E67E22;
-  --blackout-bg:    #F3EAF9;   /* фиолетовый светлый */
-  --blackout-border: #8E44AD;  /* фиолетовый */
-  --blackout-text:  #6C3483;   /* тёмно-фиолетовый */
+  --blackout-bg:    #FDEDEB;   /* светло-красный (как у danger-bg) */
+  --blackout-border: #C0392B;  /* красный (danger) */
+  --blackout-text:  #A93226;   /* тёмно-красный */
 }
+
 
 .role-switcher {
   display: flex; align-items: center; gap: 4px;
