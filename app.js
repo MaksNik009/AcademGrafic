@@ -60,7 +60,9 @@ const State = {
   modalMode: 'assign',
   activeDayKey: null,
   activeBuilding: '1',
-  activeTemplateId: null,
+  activeTemplateByBuilding: {},
+  get activeTemplateId() { return this.activeTemplateByBuilding[this.activeBuilding] || null; },
+  set activeTemplateId(v) { this.activeTemplateByBuilding[this.activeBuilding] = v || null; },
 
   avatarColors: [
     '#2C6FAC','#1A7A4A','#8E44AD','#C0392B',
@@ -74,7 +76,7 @@ const State = {
       localStorage.setItem('ag_blackout',  JSON.stringify(this.blackoutDates));
       localStorage.setItem('ag_notifs',    JSON.stringify(this.notifications));
       localStorage.setItem('ag_lessons',   JSON.stringify(this.lessons));
-      localStorage.setItem('ag_activeTemplate', this.activeTemplateId || '');
+      localStorage.setItem('ag_templateByBuilding', JSON.stringify(this.activeTemplateByBuilding));
     } catch(e) { console.warn('Cache save failed', e); }
   },
 
@@ -84,12 +86,18 @@ const State = {
       const b = localStorage.getItem('ag_blackout');
       const n = localStorage.getItem('ag_notifs');
       const l = localStorage.getItem('ag_lessons');
-      const at = localStorage.getItem('ag_activeTemplate');
       if (r) this.replaceRequests = JSON.parse(r);
       if (b) this.blackoutDates   = JSON.parse(b);
       if (n) this.notifications   = JSON.parse(n);
       if (l) this.lessons         = JSON.parse(l);
-      if (at && at !== 'null') this.activeTemplateId = at;
+      const tbb = localStorage.getItem('ag_templateByBuilding');
+      if (tbb) {
+        this.activeTemplateByBuilding = JSON.parse(tbb);
+      } else {
+        // миграция со старого единого ключа
+        const at = localStorage.getItem('ag_activeTemplate');
+        if (at && at !== 'null') this.activeTemplateByBuilding['1'] = at;
+      }
     } catch(e) { console.warn('Cache load failed', e); }
   }
 };
@@ -148,7 +156,6 @@ function getDutyIds(key) {
   return getDutyEntries(key).map(e => e.tid);
 }
 function addDuty(key, tid, dept = null, building = State.activeBuilding) {
-  // Берём ВСЕ записи для этого дня (все корпуса), чтобы не потерять чужие
   const v = State.duties[key];
   const allEntries = v ? (Array.isArray(v) ? v : [v]).map(normEntry) : [];
   const already = allEntries.some(e => e.tid === tid && e.building === building && (e.dept || null) === (dept || null));
@@ -160,7 +167,6 @@ function addDuty(key, tid, dept = null, building = State.activeBuilding) {
   }
 }
 function removeDuty(key, tid, dept = null, building = State.activeBuilding) {
-  // Берём ВСЕ записи для этого дня (все корпуса), удаляем только нужную
   const v = State.duties[key];
   const allEntries = v ? (Array.isArray(v) ? v : [v]).map(normEntry) : [];
   const filtered = allEntries.filter(e => !(e.tid === tid && e.building === building && (dept === null || e.dept === dept)));
@@ -1770,10 +1776,10 @@ async function autoDistribute(useActiveTemplate = true) {
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
 
-  // 1. Очищаем локальное состояние ТОЛЬКО для текущего корпуса (без Supabase — будет сделано батчем ниже)
+  // 1. Очищаем локальный state для текущего корпуса (только рабочие дни)
   for (const wd of workdays) {
-    if (State.duties[wd]) {
-      const v = State.duties[wd];
+    const v = State.duties[wd];
+    if (v) {
       const allEntries = (Array.isArray(v) ? v : [v]).map(normEntry);
       const kept = allEntries.filter(e => e.building !== State.activeBuilding);
       if (kept.length) State.duties[wd] = kept; else delete State.duties[wd];
@@ -1866,7 +1872,7 @@ async function autoDistribute(useActiveTemplate = true) {
     }
     if (dutyTeacher) {
       const dept = Array.isArray(dutyTeacher.depts) && dutyTeacher.depts.length ? dutyTeacher.depts[0] : (dutyTeacher.dept || '');
-      // Добавляем только в локальный state — Supabase батч будет ниже
+      // Добавляем только в локальный state — Supabase пишем батчем ниже
       const v = State.duties[key];
       const allEntries = v ? (Array.isArray(v) ? v : [v]).map(normEntry) : [];
       allEntries.push({ tid: dutyTeacher.id, dept, building: State.activeBuilding });
@@ -1934,7 +1940,7 @@ async function autoDistribute(useActiveTemplate = true) {
   } finally {
     await new Promise(r => setTimeout(r, 2500));
     _suppressRealtimeRender = false;
-    // Мигание ячеек синим — постепенно, одна за другой
+    // Прогрессивное мигание — ячейки вспыхивают по очереди
     workdays.forEach((day, i) => {
       setTimeout(() => flashCell(day), 80 + i * 60);
     });
@@ -2052,10 +2058,21 @@ async function saveScheduleBatch(rows) {
 }
 async function deleteScheduleMonthForBuilding(year, month, building) {
   if (!sb) return;
-  const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
-  const from = `${prefix}-01`;
-  const to = `${prefix}-32`;
-  await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to).eq('building', building);
+  const total = new Date(year, month + 1, 0).getDate();
+  // Удаляем только рабочие дни — выходные и праздники не трогаем
+  const workdayKeys = [];
+  for (let d = 1; d <= total; d++) {
+    const key = dateKey(year, month, d);
+    const dow = new Date(year, month, d).getDay();
+    if (dow !== 0 && !getHolidayName(key)) workdayKeys.push(key);
+  }
+  if (!workdayKeys.length) return;
+  // Удаляем батчами по 50 ключей
+  const chunkSize = 50;
+  for (let i = 0; i < workdayKeys.length; i += chunkSize) {
+    const chunk = workdayKeys.slice(i, i + chunkSize);
+    await sb.from('schedule').delete().in('date_key', chunk).eq('building', building);
+  }
 }
 async function deleteLessonsMonthForBuilding(year, month, building) {
   if (!sb) return;
