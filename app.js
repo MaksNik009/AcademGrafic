@@ -163,7 +163,7 @@ function addDuty(key, tid, dept = null, building = State.activeBuilding) {
     allEntries.push({ tid, dept: dept || null, building });
     State.duties[key] = allEntries;
     State.save();
-    if (sb) saveSchedule(key, tid, false, dept || null, building);
+    if (sb) saveSchedule(key, tid, false, dept || '', building);
   }
 }
 function removeDuty(key, tid, dept = null, building = State.activeBuilding) {
@@ -511,13 +511,13 @@ function toggleReplaceRequest(key) {
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
-    if (sb) saveSchedule(key, teacher.id, false, null, State.activeBuilding);
+    if (sb) saveSchedule(key, teacher.id, false, '', State.activeBuilding);
     State.save();
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
     State.replaceRequests[key] = true;
-    if (sb) saveSchedule(key, teacher.id, true, null, State.activeBuilding);
+    if (sb) saveSchedule(key, teacher.id, true, '', State.activeBuilding);
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
@@ -2049,7 +2049,7 @@ async function loadSchedule() { if (!sb) return; const { data, error } = await s
 function mapTeacherRow(r) { let depts = []; if (Array.isArray(r.depts) && r.depts.length) depts = r.depts; else if (r.dept) depts = [r.dept]; return { id: r.id, name: r.name, dept: depts[0] || '', depts: depts, phone: r.phone || '', maxLoad: r.max_load || 2, blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [], building: r.building || '1' }; }
 async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean); const { error } = await sb.from('teachers').upsert({ id: teacher.id, name: teacher.name, dept: depts[0] || '', depts: depts, phone: teacher.phone || '', max_load: teacher.maxLoad || 2, blackout_dates: State.blackoutDates[teacher.id] || [], building: teacher.building || '1' }, { onConflict: 'id' }); if (error) console.warn('[SB] saveTeachers error:', error.message); }
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
-async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
+async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || '', replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
 async function saveScheduleRemoveOne(key, teacherId, building = State.activeBuilding) { if (!sb) return; await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building); }
 async function saveScheduleBatch(rows) {
   if (!sb || !rows.length) return;
