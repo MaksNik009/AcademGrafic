@@ -2029,3 +2029,34 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
 .day-cell--today .day-num {
   color: #ffffff !important;
 }
+.stats-search-filter {
+  flex: 1;
+  min-width: 200px;
+  margin: 0 12px;
+}
+.stats-search-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 40px;
+  background: var(--surface);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  transition: all 0.18s;
+}
+.stats-search-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(74,144,217,0.18);
+  outline: none;
+}
+@media (max-width: 768px) {
+  .stats-topbar {
+    flex-wrap: wrap;
+  }
+  .stats-search-filter {
+    order: 1;
+    margin: 8px 0;
+    width: 100%;
+  }
+}

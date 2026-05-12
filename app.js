@@ -198,6 +198,7 @@ const DAYS_SHORT = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 const DAYS_FULL  = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 
 let toastTimer = null;
+let statsSearchText = '';
 function showToast(msg, type = 'info') {
   const el = document.getElementById('toast');
   if (!el) return;
@@ -1560,9 +1561,29 @@ function renderStats() {
   const maxD = getWorkdaysInMonth();
   const weekMap = {};
   const days = new Date(y, m + 1, 0).getDate();
-  for (let d = 1; d <= days; d++) { const key = dateKey(y, m, d); const wk = getWeekKeys(key)[0]; if (!weekMap[wk]) weekMap[wk] = getWeekKeys(key); }
-  grid.innerHTML = State.teachers.map((t, idx) => {
-    const color = getColor(idx);
+  for (let d = 1; d <= days; d++) { 
+    const key = dateKey(y, m, d); 
+    const wk = getWeekKeys(key)[0]; 
+    if (!weekMap[wk]) weekMap[wk] = getWeekKeys(key); 
+  }
+
+  const searchLower = statsSearchText.trim().toLowerCase();
+  const filteredTeachers = searchLower === ''
+    ? State.teachers
+    : State.teachers.filter(t => t.name.toLowerCase().includes(searchLower));
+
+  if (filteredTeachers.length === 0) {
+    grid.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <p class="empty-title">Ничего не найдено</p>
+      <p class="empty-sub">Попробуйте изменить поисковый запрос</p>
+    </div>`;
+    return;
+  }
+
+  grid.innerHTML = filteredTeachers.map((t, idxOrig) => {
+    const originalIdx = State.teachers.findIndex(tt => tt.id === t.id);
+    const color = getColor(originalIdx);
     const monthCount = Object.keys(State.duties).filter(k => k.startsWith(prefix) && getDutyIds(k).includes(t.id)).length;
     const maxWeekLoad = Math.max(...Object.values(weekMap).map(wk => weekDutiesCount(t.id, wk)), 0);
     const replaceCount = Object.keys(State.replaceRequests).filter(k => getDutyIds(k).includes(t.id) && k.startsWith(prefix)).length;
@@ -1575,6 +1596,7 @@ function renderStats() {
     const statusLabel = { ok: '✓ Норма', warn: '⚠ Высокая нагрузка', over: '✕ Перебор смен' }[loadStatus];
     const pctClass = `stat-bar-pct--${loadStatus}`;
     const statusClass = `stat-status--${loadStatus}`;
+
     return `<div class="stat-card">
       <div class="stat-header">
         <div class="stat-avatar" style="background:${color}">${initials(t.name)}</div>
@@ -2269,6 +2291,14 @@ function init() {
   document.getElementById('notifBtn').addEventListener('click', e => { e.stopPropagation(); const panel = document.getElementById('notifPanel'); const btn = e.currentTarget; const rect = btn.getBoundingClientRect(); const isMob = window.innerWidth <= 760; if (isMob) { const pw = Math.min(300, window.innerWidth - 16); panel.style.width = pw + 'px'; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = 'auto'; panel.style.left = '8px'; } else { panel.style.width = ''; panel.style.left = ''; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = (window.innerWidth - rect.right) + 'px'; } panel.classList.toggle('open'); });
   document.addEventListener('click', e => { if (!e.target.closest('.notif-wrap')) document.getElementById('notifPanel').classList.remove('open'); });
   document.getElementById('notifClearAll').addEventListener('click', () => { State.notifications = []; State.save(); renderNotifications(); });
+    const statsSearchInput = document.getElementById('statsSearchInput');
+  if (statsSearchInput) {
+    statsSearchInput.value = statsSearchText;
+    statsSearchInput.addEventListener('input', (e) => {
+      statsSearchText = e.target.value;
+      renderStats();
+    });
+  }
   document.getElementById('addBlackoutBtn').addEventListener('click', addBlackoutDate);
   const sbClose = document.getElementById('sbStatusClose'); if (sbClose) sbClose.addEventListener('click', () => { document.getElementById('sbStatusbar').classList.add('hidden'); });
   document.querySelectorAll('.building-tab').forEach(btn => {
