@@ -369,7 +369,7 @@ function renderCalendar() {
       cell.classList.add('day-cell--holiday');
       if (State.currentRole !== 'admin') {
         cell.setAttribute('title', getHolidayName(key) || 'Праздничный день');
-        cell.style.pointerEvents = 'none';
+        // Для учителя - не блокируем, он может смотреть пары (обработчик ниже)
       } else {
         cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
       }
@@ -380,12 +380,6 @@ function renderCalendar() {
     if (isPast)     cell.classList.add('day-cell--past');
     if (myBlackout) cell.classList.add('day-cell--blackout');
     if (isReplaceReq) cell.classList.add('day-cell--replace-req');
-
-    // Для АДМИНА: если хотя бы один из дежурных пометил этот день нежелательным — красный индикатор конфликта
-    if (State.currentRole === 'admin') {
-      const hasBlackoutConflict = dutyEntries.some(e => (State.blackoutDates[e.tid] || []).includes(key));
-      if (hasBlackoutConflict) cell.classList.add('day-cell--blackout');
-    }
 
     if (!isHoliday) {
       cell.setAttribute('role', 'button');
@@ -413,39 +407,67 @@ function renderCalendar() {
       }
     }
 
-    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник)
-    if (!isHoliday && State.currentRole === 'teacher') {
-      const hasLesson = pairTeacherIds.has(State.currentTeacherId);
-      const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
-      if (hasLesson || isDuty) {
-        cell.classList.add('cell--teacher-active');
-        if (isDuty) cell.classList.add('cell--teacher-duty');
-        const stripWrap = document.createElement('div'); stripWrap.className='cell-strips';
-        if (hasLesson) {
-          const s = document.createElement('div'); s.className='cell-strip cell-strip--lesson'; stripWrap.appendChild(s);
-        }
-        if (isDuty) {
-          const s = document.createElement('div'); s.className='cell-strip cell-strip--duty'; stripWrap.appendChild(s);
-        }
-        cell.appendChild(stripWrap);
+    // ── РЕЖИМ УЧИТЕЛЯ
+    if (State.currentRole === 'teacher') {
+      const hasLesson  = pairTeacherIds.has(State.currentTeacherId);
+      const isDuty     = dutyEntries.some(e => e.tid === State.currentTeacherId);
+      const isReplace  = isDuty && !!State.replaceRequests[key];
+      const isMyBlackout = !!(State.currentTeacherId && (State.blackoutDates[State.currentTeacherId] || []).includes(key));
+      const isWeekendOrHoliday = isSunday || isSaturday || isHoliday;
+
+      // Полоски в порядке: выходной/праздник → рабочий(пары) → дежурный → замена → нежелательный
+      const stripWrap = document.createElement('div'); stripWrap.className = 'cell-strips';
+      let hasStrips = false;
+      if (isWeekendOrHoliday) {
+        const s = document.createElement('div'); s.className = 'cell-strip cell-strip--holiday'; stripWrap.appendChild(s); hasStrips = true;
       }
-      // Показываем аватарку и ФИО дежурного (как у завуча, но без редактирования)
-      if (dutyEntries.length > 0) {
+      if (hasLesson) {
+        const s = document.createElement('div'); s.className = 'cell-strip cell-strip--lesson'; stripWrap.appendChild(s); hasStrips = true;
+      }
+      if (isDuty) {
+        const s = document.createElement('div'); s.className = 'cell-strip cell-strip--duty'; stripWrap.appendChild(s); hasStrips = true;
+      }
+      if (isReplace) {
+        const s = document.createElement('div'); s.className = 'cell-strip cell-strip--replace'; stripWrap.appendChild(s); hasStrips = true;
+      }
+      if (isMyBlackout) {
+        const s = document.createElement('div'); s.className = 'cell-strip cell-strip--blackout'; stripWrap.appendChild(s); hasStrips = true;
+      }
+      if (hasStrips) cell.appendChild(stripWrap);
+
+      // Подсветка ячейки по наивысшему приоритету (последнее = красное перекрывает)
+      if (hasLesson || isDuty || isReplace || isMyBlackout) {
+        if (hasLesson)    cell.classList.add('cell--teacher-lesson');
+        if (isDuty)       cell.classList.add('cell--teacher-duty');
+        if (isReplace)    cell.classList.add('cell--teacher-replace');
+        if (isMyBlackout) cell.classList.add('cell--teacher-blackout');
+      }
+
+      // Показываем аватарку дежурного (только для рабочих дней)
+      if (!isWeekendOrHoliday && dutyEntries.length > 0) {
         const first = dutyEntries[0];
         const t = teacherById(first.tid);
         if (t) {
           const color = getColor(teacherIndex(first.tid));
-          const chip = document.createElement('div'); chip.className='cell-duty-chip';
-          const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
-          const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
+          const chip = document.createElement('div'); chip.className = 'cell-duty-chip';
+          const av = document.createElement('div'); av.className = 'cell-duty-avatar'; av.style.background = color; av.textContent = initials(t.name);
+          const nameEl = document.createElement('div'); nameEl.className = 'cell-duty-name'; nameEl.textContent = t.name;
           chip.appendChild(av); chip.appendChild(nameEl);
           cell.appendChild(chip);
           if (dutyEntries.length > 1) {
-            const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
+            const more = document.createElement('div'); more.className = 'cell-duty-more'; more.textContent = `+${dutyEntries.length - 1}`;
             cell.appendChild(more);
           }
         }
       }
+
+      // Разрешаем открывать панель пар в любой день (включая выходные/праздники) — только просмотр
+      cell.setAttribute('role', 'button');
+      cell.setAttribute('tabindex', '0');
+      cell.style.cursor = 'pointer';
+      cell.style.pointerEvents = '';
+      cell.addEventListener('click', () => openDayPanel(key));
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
 
     // ── РЕЖИМ АДМИНИСТРАТОРА
@@ -472,8 +494,12 @@ function renderCalendar() {
       }
     }
 
-    // Обработчики кликов (для админа – все дни, для учителя – только не праздники)
-    if (!isHoliday || State.currentRole === 'admin') {
+    // Обработчики кликов — только для администратора (учитель ставит свои выше)
+    if (State.currentRole === 'admin') {
+      if (!isHoliday) {
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('tabindex', '0');
+      }
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
@@ -507,18 +533,33 @@ function quickClear(key) {
 function toggleReplaceRequest(key) {
   const ids = getDutyIds(key);
   if (!ids.length) return;
-  const teacher = teacherById(State.currentTeacherId && ids.includes(State.currentTeacherId) ? State.currentTeacherId : ids[0]);
+  const tid = State.currentTeacherId && ids.includes(State.currentTeacherId) ? State.currentTeacherId : ids[0];
+  const teacher = teacherById(tid);
+  if (!teacher) return;
   const [, mm, dd] = key.split('-');
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
+
+  // Определяем dept этого преподавателя в расписании
+  const v = State.duties[key];
+  const allEntries = v ? (Array.isArray(v) ? v : [v]) : [];
+  const myEntry = allEntries.find(e => e.tid === tid && e.building === State.activeBuilding);
+  const dept = myEntry?.dept || '';
+
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
-    if (sb) saveSchedule(key, teacher.id, false, '', State.activeBuilding);
+    if (sb) sb.from('schedule').update({ replace_request: false })
+      .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding).then(({ error }) => {
+        if (error) console.warn('[SB] replace off error:', error.message);
+      });
     State.save();
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
     State.replaceRequests[key] = true;
-    if (sb) saveSchedule(key, teacher.id, true, '', State.activeBuilding);
+    if (sb) sb.from('schedule').update({ replace_request: true })
+      .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding).then(({ error }) => {
+        if (error) console.warn('[SB] replace on error:', error.message);
+      });
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
