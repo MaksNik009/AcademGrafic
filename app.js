@@ -819,10 +819,10 @@ function renderDayPanel(key) {
           const t = teacherById(e.tid);
           const color = getColor(teacherIndex(e.tid));
           const isBlackout = (State.blackoutDates[e.tid] || []).includes(key);
-          return `<div class="pair-teacher-row">
+          return `<div class="pair-teacher-row" style="${isBlackout ? 'background:rgba(192,57,43,0.09);border-radius:7px;' : ''}">
             <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">${initials(t.name)}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:.82rem;font-weight:600;color:var(--navy);display:flex;align-items:center;gap:4px">${t.name.split(' ').slice(0,2).join(' ')}${isBlackout ? '<span title="Нежелательная дата" style="color:#c0392b;font-size:.8rem">🚫</span>' : ''}</div>
+              <div style="font-size:.82rem;font-weight:600;color:${isBlackout ? '#c0392b' : 'var(--navy)'};display:flex;align-items:center;gap:4px">${t.name.split(' ').slice(0,2).join(' ')}${isBlackout ? ' <span title="Нежелательная дата">🚫</span>' : ''}</div>
               <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">${e.dept || t.dept || ''}${e.room ? ' · 🚪 ' + e.room : ''}</div>
             </div>
             ${isAdmin ? `<button class="pair-remove-btn" onclick="removePairEntry('${key}',${p.n},${i})" title="Удалить">✕</button>` : ''}
@@ -856,26 +856,23 @@ function renderDayPanel(key) {
     </details>`;
   }).join('');
 
-  // Блок нежелательных дат после всех пар
+  // Блок нежелательных дат — после всех 6 пар
   const blackoutTeachers = State.teachers.filter(t =>
     t.building === State.activeBuilding && (State.blackoutDates[t.id] || []).includes(key)
   );
   if (blackoutTeachers.length > 0) {
-    pairsEl.innerHTML += `<div style="margin-top:12px;border:1.5px solid #e74c3c;border-radius:10px;padding:10px 14px;background:#fff5f5">
-      <div style="font-size:.78rem;font-weight:700;color:#c0392b;margin-bottom:6px;display:flex;align-items:center;gap:5px">
-        🚫 Нежелательная дата для:
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        ${blackoutTeachers.map(t => {
-          const color = getColor(teacherIndex(t.id));
-          return `<div style="display:flex;align-items:center;gap:7px">
-            <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
-            <span style="font-size:.8rem;color:#c0392b;font-weight:600">${t.name}</span>
-            <span style="font-size:.72rem;color:var(--text-muted)">${t.dept || ''}</span>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
+    const blDiv = document.createElement('div');
+    blDiv.style.cssText = 'margin-top:14px;border:2px solid #e74c3c;border-radius:10px;padding:10px 14px;background:#fff5f5;';
+    blDiv.innerHTML = `<div style="font-size:.78rem;font-weight:700;color:#c0392b;margin-bottom:8px;display:flex;align-items:center;gap:5px">🚫 Нежелательная дата для:</div>` +
+      blackoutTeachers.map(t => {
+        const color = getColor(teacherIndex(t.id));
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <div style="width:24px;height:24px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+          <span style="font-size:.82rem;font-weight:600;color:#c0392b">${t.name}</span>
+          <span style="font-size:.72rem;color:var(--text-muted)">${t.dept || ''}</span>
+        </div>`;
+      }).join('');
+    pairsEl.appendChild(blDiv);
   }
 }
 function removeDutyFromPanel(key, tid, dept) {
@@ -931,7 +928,6 @@ function addPairEntry(key, pairN) {
   if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 function removePairEntry(key, pairN, idx) {
-  // idx — индекс в отфильтрованном по корпусу массиве, нужно найти реальный индекс в State
   const all = (State.lessons[key]?.[pairN]) || [];
   let buildingCount = 0;
   let realIdx = -1;
@@ -1060,7 +1056,6 @@ function _buildWelcomePage(page) {
 }
 function _wireWelcomePage(page) {
   if (page === 'choose') {
-    State._roleSwitch = false; // первичный вход — никаких «возвратов»
     document.getElementById('wmChooseAdmin')?.addEventListener('click', () => showWelcomeModal('login'));
     document.getElementById('wmChooseTeacher')?.addEventListener('click', async () => {
       if (State.teachers.length === 0 && sb) {
@@ -1077,15 +1072,7 @@ function _wireWelcomePage(page) {
     });
   }
   if (page === 'login') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        // Возврат к текущей роли без пароля
-        State._roleSwitch = false;
-        hideWelcomeModal();
-      } else {
-        showWelcomeModal('choose');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const doLogin = () => {
       const login = (document.getElementById('authLogin')?.value || '').trim();
       const pass = (document.getElementById('authPassword')?.value || '').trim();
@@ -1105,14 +1092,7 @@ function _wireWelcomePage(page) {
     setTimeout(() => document.getElementById('authLogin')?.focus(), 60);
   }
   if (page === 'picker') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        State._roleSwitch = false;
-        hideWelcomeModal();
-      } else {
-        showWelcomeModal('choose');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const grid = document.getElementById('wmTeacherGrid');
     const search = document.getElementById('wmTeacherSearch');
     const buildRows = (filter = '') => State.teachers.map(t => {
@@ -1147,14 +1127,7 @@ function _wireWelcomePage(page) {
     setTimeout(() => search?.focus(), 60);
   }
   if (page === 'teacher-login') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        // Возврат к текущей роли — назад на picker (выбор преподавателя)
-        showWelcomeModal('picker');
-      } else {
-        showWelcomeModal('picker');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('picker'));
     const doTeacherLogin = () => {
       const pass = (document.getElementById('tAuthPassword')?.value || '').trim();
       const status = document.getElementById('tAuthStatus');
@@ -1431,12 +1404,15 @@ function saveTeacherModal() {
       Object.assign(t, { name, dept, depts, phone, maxLoad, building });
       State.blackoutDates[editId] = [...(_modalBlackouts || [])];
       t.blackoutDates = State.blackoutDates[editId];
+      if (sb) saveTeachers(t);
     }
     showToast('Данные обновлены', 'success');
   } else {
     const newId = 't_' + Date.now();
-    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] });
+    const newT = { id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] };
+    State.teachers.push(newT);
     State.blackoutDates[newId] = [...(_modalBlackouts || [])];
+    if (sb) saveTeachers(newT);
     showToast(`${name} добавлен(а)`, 'success');
   }
   _modalBlackouts = [];
@@ -1748,6 +1724,8 @@ function renderMyCabinet() {
     blEl.querySelectorAll('.blackout-remove').forEach(b => {
       b.addEventListener('click', () => {
         State.blackoutDates[tid] = (State.blackoutDates[tid] || []).filter(k => k !== b.dataset.k);
+        const t = State.teachers.find(t => t.id === tid);
+        if (t) { t.blackoutDates = State.blackoutDates[tid]; if (sb) saveTeachers(t); }
         State.save();
         renderMyCabinet(); renderCalendar(); renderAccordion();
         showToast('Дата удалена', 'info');
@@ -1764,6 +1742,8 @@ function addBlackoutDate() {
   if (!State.blackoutDates[tid]) State.blackoutDates[tid] = [];
   if (State.blackoutDates[tid].includes(val)) { showToast('Уже добавлено', 'info'); return; }
   State.blackoutDates[tid].push(val);
+  const t = State.teachers.find(t => t.id === tid);
+  if (t) { t.blackoutDates = State.blackoutDates[tid]; if (sb) saveTeachers(t); }
   State.save();
   input.value = '';
   renderMyCabinet(); renderCalendar(); renderAccordion();
@@ -2343,21 +2323,8 @@ function init() {
   const clearAllBtn = document.getElementById('clearAllBtn'); if (clearAllBtn) clearAllBtn.addEventListener('click', clearAll);
   document.getElementById('printBtn').addEventListener('click', printSchedule);
   document.getElementById('saveTemplateBtn').addEventListener('click', saveTemplate);
-  document.getElementById('roleAdmin').addEventListener('click', () => {
-    if (State.currentRole !== 'admin') {
-      // Уже вошёл в систему — показываем вход с пометкой "возврат"
-      State._roleSwitch = true;
-      showWelcomeModal('login');
-    }
-  });
-  document.getElementById('roleTeacher').addEventListener('click', () => {
-    if (State.currentRole !== 'teacher') {
-      if (State.teachers.length === 0) { showToast('Сначала добавьте преподавателей', 'error'); return; }
-      // Уже вошёл в систему — запоминаем что это переключение (не первичный вход)
-      State._roleSwitch = true;
-      showWelcomeModal('picker');
-    }
-  });
+  document.getElementById('roleAdmin').addEventListener('click', () => { if (State.currentRole !== 'admin') showWelcomeModal('login'); });
+  document.getElementById('roleTeacher').addEventListener('click', () => { if (State.currentRole !== 'teacher') { if (State.teachers.length === 0) showToast('Сначала добавьте преподавателей', 'error'); else showWelcomeModal('picker'); } });
   document.getElementById('hamburger').addEventListener('click', () => { const nav = document.getElementById('mobileNav'); const open = nav.classList.toggle('open'); document.getElementById('hamburger').classList.toggle('open', open); document.getElementById('hamburger').setAttribute('aria-expanded', open); });
   if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open');
   window.addEventListener('resize', () => { if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open'); });
