@@ -722,6 +722,8 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 .day-cell--holiday { background: var(--holiday-bg) !important; cursor: default; }
 .day-cell--holiday .day-num { color: var(--holiday-text); font-weight: 600; }
 .day-cell--replace-req { border-left: 3px solid var(--orange) !important; }
+.my-duty-status.declined { color: #c0392b; }
+
 .day-cell--blackout { background: var(--blackout-bg); }
 
 .holiday-label {

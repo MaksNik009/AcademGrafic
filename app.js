@@ -306,7 +306,8 @@ function renderCalendar() {
     const isHoliday = !!getHolidayName(key);
     const isToday = key === today;
     const isPast = key < today;
-    const isReplaceReq = !!State.replaceRequests[key];
+    // Замена актуальна только если кто-то из дежурных текущего корпуса её запросил
+    const isReplaceReq = !!State.replaceRequests[key] && getDutyEntries(key).length > 0;
     const tid = State.currentTeacherId;
     const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
     
@@ -317,15 +318,10 @@ function renderCalendar() {
     // ----- ВОСКРЕСЕНЬЕ -----
     if (isSunday) {
       cell.classList.add('day-cell--sunday');
-      if (State.currentRole === 'admin') {
-        cell.style.cursor = 'pointer';
-        cell.setAttribute('role', 'button');
-        cell.setAttribute('tabindex', '0');
-      } else {
-        cell.setAttribute('data-role-disabled', 'true');
-        cell.style.cursor = 'not-allowed';
-        cell.style.pointerEvents = 'none';
-      }
+      // Все пользователи могут открыть панель (просмотр)
+      cell.style.cursor = 'pointer';
+      cell.setAttribute('role', 'button');
+      cell.setAttribute('tabindex', '0');
       const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
       cell.appendChild(num);
       const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
@@ -482,25 +478,65 @@ function quickClear(key) {
   showToast('Дежурство снято', 'info');
 }
 function toggleReplaceRequest(key) {
+  const tid = State.currentTeacherId;
   const ids = getDutyIds(key);
-  if (!ids.length) return;
-  const teacher = teacherById(State.currentTeacherId && ids.includes(State.currentTeacherId) ? State.currentTeacherId : ids[0]);
+  // Только если этот преподаватель стоит в дежурстве в этот день
+  if (!tid || !ids.includes(tid)) { showToast('Вы не дежурите в этот день', 'error'); return; }
+  const teacher = teacherById(tid);
+  if (!teacher) return;
   const [, mm, dd] = key.split('-');
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
+
+  // Находим реальный dept этого преподавателя в расписании
+  const v = State.duties[key];
+  const allEntries = v ? (Array.isArray(v) ? v : [v]) : [];
+  const myEntry = allEntries.find(e => e.tid === tid && e.building === State.activeBuilding);
+  const dept = myEntry?.dept || '';
+
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
-    if (sb) saveSchedule(key, teacher.id, false, '', State.activeBuilding);
+    // UPDATE только replace_request — не трогаем саму строку дежурства
+    if (sb) sb.from('schedule').update({ replace_request: false })
+      .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding).eq('dept', dept)
+      .then(({ error }) => { if (error) console.warn('[SB] replace off:', error.message); });
     State.save();
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
     State.replaceRequests[key] = true;
-    if (sb) saveSchedule(key, teacher.id, true, '', State.activeBuilding);
+    // Сбрасываем отклонение если было
+    if (State.declinedRequests) delete State.declinedRequests[key];
+    // UPDATE только replace_request — не трогаем саму строку дежурства
+    if (sb) sb.from('schedule').update({ replace_request: true })
+      .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding).eq('dept', dept)
+      .then(({ error }) => { if (error) console.warn('[SB] replace on:', error.message); });
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отправлен 🔔', 'warn');
   }
+}
+
+// Завуч отклоняет запрос на замену
+function declineReplaceRequest(key) {
+  const v = State.duties[key];
+  const allEntries = v ? (Array.isArray(v) ? v : [v]) : [];
+  const entry = allEntries.find(e => e.building === State.activeBuilding && State.replaceRequests[key]);
+  if (!entry) return;
+  const teacher = teacherById(entry.tid);
+  const dept = entry.dept || '';
+  delete State.replaceRequests[key];
+  if (sb) sb.from('schedule').update({ replace_request: false })
+    .eq('date_key', key).eq('teacher_id', entry.tid).eq('building', State.activeBuilding).eq('dept', dept)
+    .then(({ error }) => { if (error) console.warn('[SB] decline replace:', error.message); });
+  State.save();
+  const [, mm, dd] = key.split('-');
+  const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
+  if (!State.declinedRequests) State.declinedRequests = {};
+  State.declinedRequests[key] = true;
+  if (teacher) addNotification(`❌ Замена ${dayLabel} отклонена (${teacher.name})`, '❌');
+  renderCalendar(); renderAccordion(); renderMyCabinet();
+  showToast(`Запрос на замену отклонён`, 'info');
 }
 
 // ─── MOBILE ACCORDION ────────────────────────────────────────────────────────
@@ -560,7 +596,11 @@ function renderAccordion() {
           const isMyDutyHere = entry.tid === tid;
           const deptLabel = entry.dept || teacher.dept || '';
           const replaceBadge = (isReplace && isMyDutyHere)
-            ? '<div style="font-size:.68rem;color:var(--orange);margin-top:3px">🔄 Просит замену</div>' : '';
+            ? `<div style="font-size:.68rem;color:var(--orange);margin-top:3px;display:flex;align-items:center;gap:6px">🔄 Просит замену${
+                State.currentRole === 'admin'
+                  ? `<button onclick="declineReplaceRequest('${key}')" style="font-size:.65rem;padding:1px 6px;background:#e74c3c;color:#fff;border:none;border-radius:4px;cursor:pointer;line-height:1.4">Отклонить</button>`
+                  : ''
+              }</div>` : '';
           const removeBtn = State.currentRole === 'admin'
             ? `<button class="acc-remove-duty mob-only" data-remove-tid="${entry.tid}" data-remove-dept="${entry.dept||''}" data-remove-key="${key}" title="Убрать дежурного">✕</button>`
             : '';
@@ -795,9 +835,15 @@ function renderDayPanel(key) {
         const t = teacherById(e.tid);
         if (!t) return '';
         const color = getColor(teacherIndex(e.tid));
-        return `<div style="display:flex;align-items:center;gap:5px;background:${color}14;border:1px solid ${color}40;border-radius:20px;padding:3px 10px 3px 4px;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">
+        const hasReplace = !!State.replaceRequests[key];
+        const replaceTag = hasReplace
+          ? `<span style="font-size:.65rem;color:var(--orange);font-weight:600">🔄</span>` : '';
+        const declineBtn = (isAdmin && hasReplace)
+          ? `<button onclick="event.stopPropagation();declineReplaceRequest('${key}')" style="background:#e74c3c;border:none;color:#fff;font-size:.6rem;padding:1px 6px;border-radius:4px;cursor:pointer;margin-left:2px" title="Отклонить замену">Отклонить</button>` : '';
+        return `<div style="display:flex;align-items:center;gap:5px;background:${hasReplace ? 'rgba(230,126,34,0.10)' : color+'14'};border:1px solid ${hasReplace ? 'var(--orange)' : color+'40'};border-radius:20px;padding:3px 10px 3px 4px;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">
           <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
           <span style="font-size:.75rem;font-weight:500;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</span>
+          ${replaceTag}${declineBtn}
           ${isAdmin ? `<button onclick="event.stopPropagation();removeDutyFromPanel('${key}','${e.tid}','${e.dept||''}')" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:.8rem;padding:0 0 0 2px" title="Убрать">✕</button>` : ''}
         </div>`;
       }).join('') +
@@ -818,11 +864,10 @@ function renderDayPanel(key) {
       ? validEntries.map((e, i) => {
           const t = teacherById(e.tid);
           const color = getColor(teacherIndex(e.tid));
-          const isBlackout = (State.blackoutDates[e.tid] || []).includes(key);
           return `<div class="pair-teacher-row">
             <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">${initials(t.name)}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:.82rem;font-weight:600;color:var(--navy);display:flex;align-items:center;gap:4px">${t.name.split(' ').slice(0,2).join(' ')}${isBlackout ? '<span title="Нежелательная дата" style="color:#c0392b;font-size:.8rem">🚫</span>' : ''}</div>
+              <div style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</div>
               <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">${e.dept || t.dept || ''}${e.room ? ' · 🚪 ' + e.room : ''}</div>
             </div>
             ${isAdmin ? `<button class="pair-remove-btn" onclick="removePairEntry('${key}',${p.n},${i})" title="Удалить">✕</button>` : ''}
@@ -855,28 +900,6 @@ function renderDayPanel(key) {
       </div>
     </details>`;
   }).join('');
-
-  // Блок нежелательных дат после всех пар
-  const blackoutTeachers = State.teachers.filter(t =>
-    t.building === State.activeBuilding && (State.blackoutDates[t.id] || []).includes(key)
-  );
-  if (blackoutTeachers.length > 0) {
-    pairsEl.innerHTML += `<div style="margin-top:12px;border:1.5px solid #e74c3c;border-radius:10px;padding:10px 14px;background:#fff5f5">
-      <div style="font-size:.78rem;font-weight:700;color:#c0392b;margin-bottom:6px;display:flex;align-items:center;gap:5px">
-        🚫 Нежелательная дата для:
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        ${blackoutTeachers.map(t => {
-          const color = getColor(teacherIndex(t.id));
-          return `<div style="display:flex;align-items:center;gap:7px">
-            <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
-            <span style="font-size:.8rem;color:#c0392b;font-weight:600">${t.name}</span>
-            <span style="font-size:.72rem;color:var(--text-muted)">${t.dept || ''}</span>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-  }
 }
 function removeDutyFromPanel(key, tid, dept) {
   removeDuty(key, tid, dept || null);
@@ -931,21 +954,20 @@ function addPairEntry(key, pairN) {
   if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 function removePairEntry(key, pairN, idx) {
-  // idx — индекс в отфильтрованном по корпусу массиве, нужно найти реальный индекс в State
+  // idx — позиция в отфильтрованном (по корпусу) массиве, ищем реальный индекс в State
   const all = (State.lessons[key]?.[pairN]) || [];
-  let buildingCount = 0;
-  let realIdx = -1;
+  let cnt = 0, realIdx = -1;
   for (let i = 0; i < all.length; i++) {
     if (all[i].building === State.activeBuilding) {
-      if (buildingCount === idx) { realIdx = i; break; }
-      buildingCount++;
+      if (cnt === idx) { realIdx = i; break; }
+      cnt++;
     }
   }
   if (realIdx === -1) return;
   all.splice(realIdx, 1);
-  if (all.length === 0) {
+  if (!all.length) {
     delete State.lessons[key][pairN];
-    if (Object.keys(State.lessons[key]).length === 0) delete State.lessons[key];
+    if (!Object.keys(State.lessons[key]).length) delete State.lessons[key];
   }
   State.save();
   renderDayPanel(key);
@@ -1060,7 +1082,6 @@ function _buildWelcomePage(page) {
 }
 function _wireWelcomePage(page) {
   if (page === 'choose') {
-    State._roleSwitch = false; // первичный вход — никаких «возвратов»
     document.getElementById('wmChooseAdmin')?.addEventListener('click', () => showWelcomeModal('login'));
     document.getElementById('wmChooseTeacher')?.addEventListener('click', async () => {
       if (State.teachers.length === 0 && sb) {
@@ -1077,15 +1098,7 @@ function _wireWelcomePage(page) {
     });
   }
   if (page === 'login') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        // Возврат к текущей роли без пароля
-        State._roleSwitch = false;
-        hideWelcomeModal();
-      } else {
-        showWelcomeModal('choose');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const doLogin = () => {
       const login = (document.getElementById('authLogin')?.value || '').trim();
       const pass = (document.getElementById('authPassword')?.value || '').trim();
@@ -1105,14 +1118,7 @@ function _wireWelcomePage(page) {
     setTimeout(() => document.getElementById('authLogin')?.focus(), 60);
   }
   if (page === 'picker') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        State._roleSwitch = false;
-        hideWelcomeModal();
-      } else {
-        showWelcomeModal('choose');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const grid = document.getElementById('wmTeacherGrid');
     const search = document.getElementById('wmTeacherSearch');
     const buildRows = (filter = '') => State.teachers.map(t => {
@@ -1147,14 +1153,7 @@ function _wireWelcomePage(page) {
     setTimeout(() => search?.focus(), 60);
   }
   if (page === 'teacher-login') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        // Возврат к текущей роли — назад на picker (выбор преподавателя)
-        showWelcomeModal('picker');
-      } else {
-        showWelcomeModal('picker');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('picker'));
     const doTeacherLogin = () => {
       const pass = (document.getElementById('tAuthPassword')?.value || '').trim();
       const status = document.getElementById('tAuthStatus');
@@ -1724,9 +1723,12 @@ function renderMyCabinet() {
       const d = new Date(key + 'T00:00:00');
       const dayStr = `${d.getDate()} ${MONTHS_RU_GEN[d.getMonth()]}`;
       const isReq = !!State.replaceRequests[key];
+      const isDeclined = !isReq && (State.declinedRequests || {})[key];
       return `<div class="my-duty-row">
         <div class="my-duty-date">${dayStr}, ${DAYS_SHORT[d.getDay()]}</div>
-        <div class="my-duty-status${isReq ? ' replace' : ''}">${isReq ? '🔄 Запрошена замена' : '✓ Запланировано'}</div>
+        <div class="my-duty-status${isReq ? ' replace' : isDeclined ? ' declined' : ''}">
+          ${isReq ? '🔄 Запрошена замена' : isDeclined ? '❌ Замена отклонена' : '✓ Запланировано'}
+        </div>
         <button class="my-duty-action${isReq ? ' cancel' : ''}" data-key="${key}">
           ${isReq ? 'Отменить' : '🔄 Запросить замену'}
         </button>
@@ -2343,21 +2345,8 @@ function init() {
   const clearAllBtn = document.getElementById('clearAllBtn'); if (clearAllBtn) clearAllBtn.addEventListener('click', clearAll);
   document.getElementById('printBtn').addEventListener('click', printSchedule);
   document.getElementById('saveTemplateBtn').addEventListener('click', saveTemplate);
-  document.getElementById('roleAdmin').addEventListener('click', () => {
-    if (State.currentRole !== 'admin') {
-      // Уже вошёл в систему — показываем вход с пометкой "возврат"
-      State._roleSwitch = true;
-      showWelcomeModal('login');
-    }
-  });
-  document.getElementById('roleTeacher').addEventListener('click', () => {
-    if (State.currentRole !== 'teacher') {
-      if (State.teachers.length === 0) { showToast('Сначала добавьте преподавателей', 'error'); return; }
-      // Уже вошёл в систему — запоминаем что это переключение (не первичный вход)
-      State._roleSwitch = true;
-      showWelcomeModal('picker');
-    }
-  });
+  document.getElementById('roleAdmin').addEventListener('click', () => { if (State.currentRole !== 'admin') showWelcomeModal('login'); });
+  document.getElementById('roleTeacher').addEventListener('click', () => { if (State.currentRole !== 'teacher') { if (State.teachers.length === 0) showToast('Сначала добавьте преподавателей', 'error'); else showWelcomeModal('picker'); } });
   document.getElementById('hamburger').addEventListener('click', () => { const nav = document.getElementById('mobileNav'); const open = nav.classList.toggle('open'); document.getElementById('hamburger').classList.toggle('open', open); document.getElementById('hamburger').setAttribute('aria-expanded', open); });
   if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open');
   window.addEventListener('resize', () => { if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open'); });
