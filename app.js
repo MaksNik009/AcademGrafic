@@ -818,11 +818,10 @@ function renderDayPanel(key) {
       ? validEntries.map((e, i) => {
           const t = teacherById(e.tid);
           const color = getColor(teacherIndex(e.tid));
-          const isBlackout = (State.blackoutDates[e.tid] || []).includes(key);
           return `<div class="pair-teacher-row">
             <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">${initials(t.name)}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:.82rem;font-weight:600;color:var(--navy);display:flex;align-items:center;gap:4px">${t.name.split(' ').slice(0,2).join(' ')}${isBlackout ? '<span title="Нежелательная дата" style="color:#c0392b;font-size:.8rem">🚫</span>' : ''}</div>
+              <div style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</div>
               <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">${e.dept || t.dept || ''}${e.room ? ' · 🚪 ' + e.room : ''}</div>
             </div>
             ${isAdmin ? `<button class="pair-remove-btn" onclick="removePairEntry('${key}',${p.n},${i})" title="Удалить">✕</button>` : ''}
@@ -855,28 +854,6 @@ function renderDayPanel(key) {
       </div>
     </details>`;
   }).join('');
-
-  // Блок нежелательных дат после всех пар
-  const blackoutTeachers = State.teachers.filter(t =>
-    t.building === State.activeBuilding && (State.blackoutDates[t.id] || []).includes(key)
-  );
-  if (blackoutTeachers.length > 0) {
-    pairsEl.innerHTML += `<div style="margin-top:12px;border:1.5px solid #e74c3c;border-radius:10px;padding:10px 14px;background:#fff5f5">
-      <div style="font-size:.78rem;font-weight:700;color:#c0392b;margin-bottom:6px;display:flex;align-items:center;gap:5px">
-        🚫 Нежелательная дата для:
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        ${blackoutTeachers.map(t => {
-          const color = getColor(teacherIndex(t.id));
-          return `<div style="display:flex;align-items:center;gap:7px">
-            <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
-            <span style="font-size:.8rem;color:#c0392b;font-weight:600">${t.name}</span>
-            <span style="font-size:.72rem;color:var(--text-muted)">${t.dept || ''}</span>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-  }
 }
 function removeDutyFromPanel(key, tid, dept) {
   removeDuty(key, tid, dept || null);
@@ -931,22 +908,8 @@ function addPairEntry(key, pairN) {
   if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 function removePairEntry(key, pairN, idx) {
-  // idx — индекс в отфильтрованном по корпусу массиве, нужно найти реальный индекс в State
-  const all = (State.lessons[key]?.[pairN]) || [];
-  let buildingCount = 0;
-  let realIdx = -1;
-  for (let i = 0; i < all.length; i++) {
-    if (all[i].building === State.activeBuilding) {
-      if (buildingCount === idx) { realIdx = i; break; }
-      buildingCount++;
-    }
-  }
-  if (realIdx === -1) return;
-  all.splice(realIdx, 1);
-  if (all.length === 0) {
-    delete State.lessons[key][pairN];
-    if (Object.keys(State.lessons[key]).length === 0) delete State.lessons[key];
-  }
+  const entries = getPairEntries(key, pairN);
+  entries.splice(idx, 1);
   State.save();
   renderDayPanel(key);
   saveLessonsBatch(key, State.lessons[key] || {});
@@ -1060,7 +1023,6 @@ function _buildWelcomePage(page) {
 }
 function _wireWelcomePage(page) {
   if (page === 'choose') {
-    State._roleSwitch = false; // первичный вход — никаких «возвратов»
     document.getElementById('wmChooseAdmin')?.addEventListener('click', () => showWelcomeModal('login'));
     document.getElementById('wmChooseTeacher')?.addEventListener('click', async () => {
       if (State.teachers.length === 0 && sb) {
@@ -1077,15 +1039,7 @@ function _wireWelcomePage(page) {
     });
   }
   if (page === 'login') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        // Возврат к текущей роли без пароля
-        State._roleSwitch = false;
-        hideWelcomeModal();
-      } else {
-        showWelcomeModal('choose');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const doLogin = () => {
       const login = (document.getElementById('authLogin')?.value || '').trim();
       const pass = (document.getElementById('authPassword')?.value || '').trim();
@@ -1105,14 +1059,7 @@ function _wireWelcomePage(page) {
     setTimeout(() => document.getElementById('authLogin')?.focus(), 60);
   }
   if (page === 'picker') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        State._roleSwitch = false;
-        hideWelcomeModal();
-      } else {
-        showWelcomeModal('choose');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('choose'));
     const grid = document.getElementById('wmTeacherGrid');
     const search = document.getElementById('wmTeacherSearch');
     const buildRows = (filter = '') => State.teachers.map(t => {
@@ -1147,14 +1094,7 @@ function _wireWelcomePage(page) {
     setTimeout(() => search?.focus(), 60);
   }
   if (page === 'teacher-login') {
-    document.getElementById('wmBack')?.addEventListener('click', () => {
-      if (State._roleSwitch) {
-        // Возврат к текущей роли — назад на picker (выбор преподавателя)
-        showWelcomeModal('picker');
-      } else {
-        showWelcomeModal('picker');
-      }
-    });
+    document.getElementById('wmBack')?.addEventListener('click', () => showWelcomeModal('picker'));
     const doTeacherLogin = () => {
       const pass = (document.getElementById('tAuthPassword')?.value || '').trim();
       const status = document.getElementById('tAuthStatus');
@@ -2343,21 +2283,8 @@ function init() {
   const clearAllBtn = document.getElementById('clearAllBtn'); if (clearAllBtn) clearAllBtn.addEventListener('click', clearAll);
   document.getElementById('printBtn').addEventListener('click', printSchedule);
   document.getElementById('saveTemplateBtn').addEventListener('click', saveTemplate);
-  document.getElementById('roleAdmin').addEventListener('click', () => {
-    if (State.currentRole !== 'admin') {
-      // Уже вошёл в систему — показываем вход с пометкой "возврат"
-      State._roleSwitch = true;
-      showWelcomeModal('login');
-    }
-  });
-  document.getElementById('roleTeacher').addEventListener('click', () => {
-    if (State.currentRole !== 'teacher') {
-      if (State.teachers.length === 0) { showToast('Сначала добавьте преподавателей', 'error'); return; }
-      // Уже вошёл в систему — запоминаем что это переключение (не первичный вход)
-      State._roleSwitch = true;
-      showWelcomeModal('picker');
-    }
-  });
+  document.getElementById('roleAdmin').addEventListener('click', () => { if (State.currentRole !== 'admin') showWelcomeModal('login'); });
+  document.getElementById('roleTeacher').addEventListener('click', () => { if (State.currentRole !== 'teacher') { if (State.teachers.length === 0) showToast('Сначала добавьте преподавателей', 'error'); else showWelcomeModal('picker'); } });
   document.getElementById('hamburger').addEventListener('click', () => { const nav = document.getElementById('mobileNav'); const open = nav.classList.toggle('open'); document.getElementById('hamburger').classList.toggle('open', open); document.getElementById('hamburger').setAttribute('aria-expanded', open); });
   if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open');
   window.addEventListener('resize', () => { if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open'); });
