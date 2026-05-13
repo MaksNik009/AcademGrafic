@@ -240,14 +240,14 @@ function _syncBuildingTabs(b) {
 }
 
 // ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
-function addNotification(msg, icon = '🔔') {
+function addNotification(msg, icon = '🔔', forTid = null) {
   const n = {
     id: 'n_' + Date.now(),
-    msg, icon,
+    msg, icon, forTid,
     time: new Date().toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' })
   };
   State.notifications.unshift(n);
-  if (State.notifications.length > 20) State.notifications.pop();
+  if (State.notifications.length > 50) State.notifications.pop();
   State.save();
   renderNotifications();
 }
@@ -255,13 +255,18 @@ function renderNotifications() {
   const list = document.getElementById('notifList');
   const dot  = document.getElementById('notifDot');
   if (!list || !dot) return;
-  const count = State.notifications.length;
+  // Фильтрация: завуч видит все, преподаватель — только свои (forTid === null || forTid === его tid)
+  const tid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
+  const visible = State.notifications.filter(n =>
+    tid === null ? true : (n.forTid === null || n.forTid === undefined || n.forTid === tid)
+  );
+  const count = visible.length;
   dot.classList.toggle('visible', count > 0);
   if (count === 0) {
     list.innerHTML = '<div class="notif-empty">Нет новых уведомлений</div>';
     return;
   }
-  list.innerHTML = State.notifications.map(n => `
+  list.innerHTML = visible.map(n => `
     <div class="notif-item">
       <div class="notif-icon">${n.icon}</div>
       <div class="notif-text">
@@ -539,7 +544,7 @@ function toggleReplaceRequest(key) {
       .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding)
       .then(({ error }) => { if (error) console.warn('[SB] replace on:', error.message); });
     State.save();
-    addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
+    addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄', null);
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отправлен 🔔', 'warn');
   }
@@ -559,7 +564,7 @@ function declineReplaceRequest(key) {
   State.save();
   const [, mm, dd] = key.split('-');
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
-  if (teacher) addNotification(`❌ Замена ${dayLabel} отклонена (${teacher.name})`, '❌');
+  if (teacher) addNotification(`❌ Замена ${dayLabel} отклонена (${teacher.name})`, '❌', req.tid);
   renderCalendar(); renderAccordion(); renderMyCabinet();
   showToast('Запрос на замену отклонён', 'info');
 }
@@ -2169,7 +2174,7 @@ async function loadLessons() { if (!sb) return; const y = State.currentDate.getF
 async function saveLessonsBatch(key, lessons) { if (!sb) return; await sb.from('lessons').delete().eq('date_key', key); const rows = []; [1,2,3,4,5,6].forEach(pn => { (lessons[pn] || []).forEach(e => { rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '', building: e.building || State.activeBuilding }); }); }); if (rows.length) await sb.from('lessons').insert(rows); }
 function subscribeRealtime() { if (!sb || sbChannel) return; sbChannel = sb.channel('ag-realtime-v6').on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange).on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, onTeacherChange).on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, onLessonsChange).subscribe(status => { if (status === 'SUBSCRIBED') setSbStatus('connected', 'подключено · Realtime ⚡'); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { setSbStatus('error', 'Realtime: ошибка канала'); setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000); } else if (status === 'CLOSED') { sbChannel = null; setSbStatus('error', 'Realtime: канал закрыт'); } }); }
 function onLessonsChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { if (sb) { sb.from('lessons').select('pair_num, teacher_id, dept, room, building').eq('date_key', key).then(({ data }) => { State.lessons[key] = {}; (data || []).forEach(r => { if (!State.lessons[key][r.pair_num]) State.lessons[key][r.pair_num] = []; State.lessons[key][r.pair_num].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); if (State.activeDayKey === key) renderDayPanel(key); }); } } else { const pn = row.pair_num; if (!State.lessons[key]) State.lessons[key] = {}; if (!State.lessons[key][pn]) State.lessons[key][pn] = []; const exists = State.lessons[key][pn].some(e => e.tid === row.teacher_id && e.room === row.room); if (!exists) State.lessons[key][pn].push({ tid: row.teacher_id, dept: row.dept || '', room: row.room || '', building: row.building || '1' }); if (State.activeDayKey === key) renderDayPanel(key); } renderCalendar(); }
-function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = { tid: row.teacher_id, building: row.building || '1' }; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
+function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = { tid: row.teacher_id, building: row.building || '1' }; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄', null); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
 function onTeacherChange({ eventType, new: row, old: oldRow }) { if (eventType === 'DELETE') { State.teachers = State.teachers.filter(t => t.id !== oldRow.id); } else { const mapped = mapTeacherRow(row); const idx = State.teachers.findIndex(t => t.id === row.id); if (idx >= 0) State.teachers[idx] = { ...State.teachers[idx], ...mapped }; else State.teachers.push(mapped); if (mapped.blackoutDates?.length) State.blackoutDates[mapped.id] = mapped.blackoutDates; } State.save(); renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); }
 function flashCell(key) { const cell = document.querySelector(`.day-cell[data-key="${key}"]`); if (!cell) return; cell.classList.remove('rt-flash'); void cell.offsetWidth; cell.classList.add('rt-flash'); setTimeout(() => cell.classList.remove('rt-flash'), 900); }
 
@@ -2375,7 +2380,15 @@ function init() {
   window.addEventListener('resize', () => { if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open'); });
   document.getElementById('notifBtn').addEventListener('click', e => { e.stopPropagation(); const panel = document.getElementById('notifPanel'); const btn = e.currentTarget; const rect = btn.getBoundingClientRect(); const isMob = window.innerWidth <= 760; if (isMob) { const pw = Math.min(300, window.innerWidth - 16); panel.style.width = pw + 'px'; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = 'auto'; panel.style.left = '8px'; } else { panel.style.width = ''; panel.style.left = ''; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = (window.innerWidth - rect.right) + 'px'; } panel.classList.toggle('open'); });
   document.addEventListener('click', e => { if (!e.target.closest('.notif-wrap')) document.getElementById('notifPanel').classList.remove('open'); });
-  document.getElementById('notifClearAll').addEventListener('click', () => { State.notifications = []; State.save(); renderNotifications(); });
+  document.getElementById('notifClearAll').addEventListener('click', () => {
+    const tid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
+    if (tid === null) {
+      State.notifications = [];
+    } else {
+      State.notifications = State.notifications.filter(n => n.forTid !== null && n.forTid !== undefined && n.forTid !== tid);
+    }
+    State.save(); renderNotifications();
+  });
     const statsSearchInput = document.getElementById('statsSearchInput');
   if (statsSearchInput) {
     statsSearchInput.value = statsSearchText;
