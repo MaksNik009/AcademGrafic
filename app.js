@@ -306,8 +306,7 @@ function renderCalendar() {
     const isHoliday = !!getHolidayName(key);
     const isToday = key === today;
     const isPast = key < today;
-    // Замена видна только в том корпусе, где её запросили
-    const isReplaceReq = State.replaceRequests[key] === State.activeBuilding;
+    const isReplaceReq = !!State.replaceRequests[key];
     const tid = State.currentTeacherId;
     const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
     
@@ -323,7 +322,7 @@ function renderCalendar() {
         cell.setAttribute('role', 'button');
         cell.setAttribute('tabindex', '0');
       } else {
-        // Учитель: можно открыть для просмотра, но не редактировать
+        // Учитель может смотреть пары в воскресенье
         cell.style.cursor = 'pointer';
         cell.setAttribute('role', 'button');
         cell.setAttribute('tabindex', '0');
@@ -333,28 +332,24 @@ function renderCalendar() {
       const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
       cell.appendChild(sunLabel);
       // Дежурные в воскресенье — для всех ролей
-      const dutyEntries = getDutyEntries(key);
-      if (dutyEntries.length > 0) {
-        const first = dutyEntries[0];
-        const t = teacherById(first.tid);
+      const sundayDuty = getDutyEntries(key);
+      if (sundayDuty.length > 0) {
+        const first = sundayDuty[0]; const t = teacherById(first.tid);
         if (t) {
           const color = getColor(teacherIndex(first.tid));
           const chip = document.createElement('div'); chip.className='cell-duty-chip';
           const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
           if (State.currentRole === 'admin') av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(first.tid); });
           const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
-          chip.appendChild(av); chip.appendChild(nameEl);
-          cell.appendChild(chip);
-          if (dutyEntries.length > 1) {
-            const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
-            cell.appendChild(more);
+          chip.appendChild(av); chip.appendChild(nameEl); cell.appendChild(chip);
+          if (sundayDuty.length > 1) {
+            const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${sundayDuty.length-1}`; cell.appendChild(more);
           }
         }
       } else if (State.currentRole === 'admin') {
-        const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
-        cell.appendChild(hint);
+        const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+'; cell.appendChild(hint);
       }
-      // Обработчик клика для воскресенья — для всех
+      // Клик открывает панель для всех ролей
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
       grid.appendChild(cell);
@@ -367,7 +362,7 @@ function renderCalendar() {
       cell.classList.add('day-cell--holiday');
       if (State.currentRole !== 'admin') {
         cell.setAttribute('title', getHolidayName(key) || 'Праздничный день');
-        // Учитель может смотреть пары в праздники, просто без редактирования
+        // Учитель может смотреть пары (клик добавится в блоке учителя ниже)
       } else {
         cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
       }
@@ -411,46 +406,37 @@ function renderCalendar() {
       const isDuty       = dutyEntries.some(e => e.tid === State.currentTeacherId);
       const isReplace    = isDuty && (State.replaceRequests[key] === State.activeBuilding);
       const isMyBlackout = !!(State.currentTeacherId && (State.blackoutDates[State.currentTeacherId] || []).includes(key));
-
-      // Полоски строго в порядке: зелёный(пары) → фиолетовый(дежурный) → оранжевый(замена) → красный(нежелательный)
+      // Полоски рядом слева: зелёный → фиолетовый → оранжевый → красный
       if (hasLesson || isDuty || isReplace || isMyBlackout) {
-        const stripWrap = document.createElement('div'); stripWrap.className = 'cell-strips';
-        if (hasLesson)    { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--lesson';   stripWrap.appendChild(s); }
-        if (isDuty)       { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--duty';     stripWrap.appendChild(s); }
-        if (isReplace)    { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--replace';  stripWrap.appendChild(s); }
-        if (isMyBlackout) { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--blackout'; stripWrap.appendChild(s); }
-        cell.appendChild(stripWrap);
-        // Подсветка ячейки по наивысшему приоритету
+        const sw = document.createElement('div'); sw.className = 'cell-strips';
+        if (hasLesson)    { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--lesson';   sw.appendChild(s); }
+        if (isDuty)       { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--duty';     sw.appendChild(s); }
+        if (isReplace)    { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--replace';  sw.appendChild(s); }
+        if (isMyBlackout) { const s = document.createElement('div'); s.className = 'cell-strip cell-strip--blackout'; sw.appendChild(s); }
+        cell.appendChild(sw);
         if (hasLesson)    cell.classList.add('cell--teacher-active');
         if (isDuty)       cell.classList.add('cell--teacher-duty');
         if (isReplace)    cell.classList.add('cell--teacher-replace');
         if (isMyBlackout) cell.classList.add('cell--teacher-blackout');
       }
-
-      // Аватарка дежурного — во всех днях включая праздники/субботы
+      // Аватарка дежурного — во всех днях включая праздники и выходные
       if (dutyEntries.length > 0) {
-        const first = dutyEntries[0];
-        const t = teacherById(first.tid);
+        const first = dutyEntries[0]; const t = teacherById(first.tid);
         if (t) {
           const color = getColor(teacherIndex(first.tid));
           const chip = document.createElement('div'); chip.className = 'cell-duty-chip';
           const av = document.createElement('div'); av.className = 'cell-duty-avatar'; av.style.background = color; av.textContent = initials(t.name);
           const nameEl = document.createElement('div'); nameEl.className = 'cell-duty-name'; nameEl.textContent = t.name;
-          chip.appendChild(av); chip.appendChild(nameEl);
-          cell.appendChild(chip);
+          chip.appendChild(av); chip.appendChild(nameEl); cell.appendChild(chip);
           if (dutyEntries.length > 1) {
-            const more = document.createElement('div'); more.className = 'cell-duty-more'; more.textContent = `+${dutyEntries.length - 1}`;
-            cell.appendChild(more);
+            const more = document.createElement('div'); more.className = 'cell-duty-more'; more.textContent = `+${dutyEntries.length - 1}`; cell.appendChild(more);
           }
         }
       }
-
-      // Разрешаем открывать панель для любого дня (включая праздники)
-      if (!cell.onclick) {
-        cell.setAttribute('role', 'button'); cell.setAttribute('tabindex', '0');
-        cell.addEventListener('click', () => openDayPanel(key));
-        cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
-      }
+      // Учитель открывает панель в любой день
+      cell.setAttribute('role', 'button'); cell.setAttribute('tabindex', '0'); cell.style.cursor = 'pointer';
+      cell.addEventListener('click', () => openDayPanel(key));
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
 
     // ── РЕЖИМ АДМИНИСТРАТОРА
@@ -475,10 +461,7 @@ function renderCalendar() {
         const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
         cell.appendChild(hint);
       }
-    }
-
-    // Обработчики кликов для администратора (учитель ставит свои выше)
-    if (State.currentRole === 'admin') {
+      // Обработчики кликов для администратора
       if (!isHoliday) { cell.setAttribute('role', 'button'); cell.setAttribute('tabindex', '0'); }
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
@@ -523,7 +506,7 @@ function toggleReplaceRequest(key) {
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
-    State.replaceRequests[key] = State.activeBuilding;
+    State.replaceRequests[key] = true;
     if (sb) saveSchedule(key, teacher.id, true, '', State.activeBuilding);
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
@@ -567,7 +550,7 @@ function renderAccordion() {
       if (dow === 0) return;
       const isHoliday = !!getHolidayName(key);
       const isToday = key === today;
-      const isReplace = State.replaceRequests[key] === State.activeBuilding;
+      const isReplace = !!State.replaceRequests[key];
       const dutyEntries = getDutyEntries(key);
       const dutyIds = dutyEntries.map(e => e.tid);
       const tid = State.currentTeacherId;
@@ -611,7 +594,7 @@ function renderAccordion() {
         if (State.currentRole === 'admin') {
           actionBtn = `<button class="acc-action-btn" data-action="assign" data-key="${key}">+</button>`;
         } else if (State.currentRole === 'teacher' && dutyIds.includes(tid)) {
-          const isReq = State.replaceRequests[key] === State.activeBuilding;
+          const isReq = !!State.replaceRequests[key];
           actionBtn = `<button class="acc-action-btn orange-btn" data-action="toggle-replace" data-key="${key}">${isReq ? '↩' : '🔄'}</button>`;
         }
       }
@@ -1692,7 +1675,7 @@ function renderMyCabinet() {
     listEl.innerHTML = myDuties.map(key => {
       const d = new Date(key + 'T00:00:00');
       const dayStr = `${d.getDate()} ${MONTHS_RU_GEN[d.getMonth()]}`;
-      const isReq = State.replaceRequests[key] === State.activeBuilding;
+      const isReq = !!State.replaceRequests[key];
       return `<div class="my-duty-row">
         <div class="my-duty-date">${dayStr}, ${DAYS_SHORT[d.getDay()]}</div>
         <div class="my-duty-status${isReq ? ' replace' : ''}">${isReq ? '🔄 Запрошена замена' : '✓ Запланировано'}</div>
@@ -1783,6 +1766,37 @@ async function applyTemplate(templateId) {
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
   showToast(`Шаблон «${data.name}» загружен`, 'success');
 }
+async function clearAllReplacesAndBlackouts() {
+  const confirmed = await new Promise(res => {
+    showConfirmDialog(
+      'Сбросить все запросы на замену и нежелательные даты у всех преподавателей?',
+      () => res(true), () => res(false)
+    );
+  });
+  if (!confirmed) return;
+
+  // 1. Сбрасываем replace_request в расписании
+  State.replaceRequests = {};
+  if (sb) {
+    await sb.from('schedule').update({ replace_request: false }).eq('replace_request', true);
+  }
+
+  // 2. Сбрасываем нежелательные даты у всех преподавателей
+  for (const t of State.teachers) {
+    t.blackoutDates = [];
+    State.blackoutDates[t.id] = [];
+  }
+  if (sb) {
+    for (const t of State.teachers) {
+      await sb.from('teachers').update({ blackout_dates: [] }).eq('id', t.id);
+    }
+  }
+
+  State.save();
+  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
+  showToast('Запросы на замену и нежелательные даты сброшены', 'success');
+}
+
 async function autoDistribute(useActiveTemplate = true) {
   if (State.teachers.length === 0) {
     showToast('Добавьте хотя бы одного преподавателя', 'error');
@@ -2073,7 +2087,7 @@ async function initSupabase() {
   }
 }
 async function loadTeachers() { if (!sb) return; const { data, error } = await sb.from('teachers').select('*').order('name'); if (error) { console.warn('[SB] loadTeachers error:', error.message); return; } if (!data || data.length === 0) return; State.teachers = data.map(mapTeacherRow); State.blackoutDates = {}; State.teachers.forEach(t => { if (t.blackoutDates?.length) State.blackoutDates[t.id] = t.blackoutDates; }); State.save(); renderTeachersList(); }
-async function loadSchedule() { if (!sb) return; const { data, error } = await sb.from('schedule').select('date_key, teacher_id, dept, replace_request, building'); if (error) { console.warn('[SB] loadSchedule error:', error.message); return; } State.duties = {}; State.replaceRequests = {}; (data || []).forEach(r => { if (r.teacher_id) { if (!State.duties[r.date_key]) State.duties[r.date_key] = []; const entry = { tid: r.teacher_id, dept: r.dept || null, building: r.building || '1' }; if (!State.duties[r.date_key].some(e => e.tid === entry.tid && e.dept === entry.dept && e.building === entry.building)) State.duties[r.date_key].push(entry); } if (r.replace_request) State.replaceRequests[r.date_key] = r.building || '1'; }); State.save(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet(); }
+async function loadSchedule() { if (!sb) return; const { data, error } = await sb.from('schedule').select('date_key, teacher_id, dept, replace_request, building'); if (error) { console.warn('[SB] loadSchedule error:', error.message); return; } State.duties = {}; State.replaceRequests = {}; (data || []).forEach(r => { if (r.teacher_id) { if (!State.duties[r.date_key]) State.duties[r.date_key] = []; const entry = { tid: r.teacher_id, dept: r.dept || null, building: r.building || '1' }; if (!State.duties[r.date_key].some(e => e.tid === entry.tid && e.dept === entry.dept && e.building === entry.building)) State.duties[r.date_key].push(entry); } if (r.replace_request) State.replaceRequests[r.date_key] = true; }); State.save(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet(); }
 function mapTeacherRow(r) { let depts = []; if (Array.isArray(r.depts) && r.depts.length) depts = r.depts; else if (r.dept) depts = [r.dept]; return { id: r.id, name: r.name, dept: depts[0] || '', depts: depts, phone: r.phone || '', maxLoad: r.max_load || 2, blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [], building: r.building || '1' }; }
 async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean); const { error } = await sb.from('teachers').upsert({ id: teacher.id, name: teacher.name, dept: depts[0] || '', depts: depts, phone: teacher.phone || '', max_load: teacher.maxLoad || 2, blackout_dates: State.blackoutDates[teacher.id] || [], building: teacher.building || '1' }, { onConflict: 'id' }); if (error) console.warn('[SB] saveTeachers error:', error.message); }
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
@@ -2113,7 +2127,7 @@ async function loadLessons() { if (!sb) return; const y = State.currentDate.getF
 async function saveLessonsBatch(key, lessons) { if (!sb) return; await sb.from('lessons').delete().eq('date_key', key); const rows = []; [1,2,3,4,5,6].forEach(pn => { (lessons[pn] || []).forEach(e => { rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '', building: e.building || State.activeBuilding }); }); }); if (rows.length) await sb.from('lessons').insert(rows); }
 function subscribeRealtime() { if (!sb || sbChannel) return; sbChannel = sb.channel('ag-realtime-v6').on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange).on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, onTeacherChange).on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, onLessonsChange).subscribe(status => { if (status === 'SUBSCRIBED') setSbStatus('connected', 'подключено · Realtime ⚡'); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { setSbStatus('error', 'Realtime: ошибка канала'); setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000); } else if (status === 'CLOSED') { sbChannel = null; setSbStatus('error', 'Realtime: канал закрыт'); } }); }
 function onLessonsChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { if (sb) { sb.from('lessons').select('pair_num, teacher_id, dept, room, building').eq('date_key', key).then(({ data }) => { State.lessons[key] = {}; (data || []).forEach(r => { if (!State.lessons[key][r.pair_num]) State.lessons[key][r.pair_num] = []; State.lessons[key][r.pair_num].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); if (State.activeDayKey === key) renderDayPanel(key); }); } } else { const pn = row.pair_num; if (!State.lessons[key]) State.lessons[key] = {}; if (!State.lessons[key][pn]) State.lessons[key][pn] = []; const exists = State.lessons[key][pn].some(e => e.tid === row.teacher_id && e.room === row.room); if (!exists) State.lessons[key][pn].push({ tid: row.teacher_id, dept: row.dept || '', room: row.room || '', building: row.building || '1' }); if (State.activeDayKey === key) renderDayPanel(key); } renderCalendar(); }
-function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = row.building || '1'; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
+function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = true; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
 function onTeacherChange({ eventType, new: row, old: oldRow }) { if (eventType === 'DELETE') { State.teachers = State.teachers.filter(t => t.id !== oldRow.id); } else { const mapped = mapTeacherRow(row); const idx = State.teachers.findIndex(t => t.id === row.id); if (idx >= 0) State.teachers[idx] = { ...State.teachers[idx], ...mapped }; else State.teachers.push(mapped); if (mapped.blackoutDates?.length) State.blackoutDates[mapped.id] = mapped.blackoutDates; } State.save(); renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); }
 function flashCell(key) { const cell = document.querySelector(`.day-cell[data-key="${key}"]`); if (!cell) return; cell.classList.remove('rt-flash'); void cell.offsetWidth; cell.classList.add('rt-flash'); setTimeout(() => cell.classList.remove('rt-flash'), 900); }
 
@@ -2310,6 +2324,8 @@ function init() {
   document.getElementById('openAddTeacherBtn').addEventListener('click', () => openTeacherModal());
   document.getElementById('autoDistributeBtn').addEventListener('click', () => autoDistribute(true));
   const clearAllBtn = document.getElementById('clearAllBtn'); if (clearAllBtn) clearAllBtn.addEventListener('click', clearAll);
+  const clearRBBtn = document.getElementById('clearReplaceBlackoutBtn');
+  if (clearRBBtn) clearRBBtn.addEventListener('click', clearAllReplacesAndBlackouts);
   document.getElementById('printBtn').addEventListener('click', printSchedule);
   document.getElementById('saveTemplateBtn').addEventListener('click', saveTemplate);
   document.getElementById('roleAdmin').addEventListener('click', () => { if (State.currentRole !== 'admin') showWelcomeModal('login'); });
