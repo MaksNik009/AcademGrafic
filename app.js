@@ -71,11 +71,34 @@ const State = {
   ],
 
   save() {
-    // Все данные хранятся в Supabase — localStorage не используется
+    try {
+      localStorage.setItem('ag_replace',   JSON.stringify(this.replaceRequests));
+      localStorage.setItem('ag_blackout',  JSON.stringify(this.blackoutDates));
+      localStorage.setItem('ag_notifs',    JSON.stringify(this.notifications));
+      localStorage.setItem('ag_lessons',   JSON.stringify(this.lessons));
+      localStorage.setItem('ag_templateByBuilding', JSON.stringify(this.activeTemplateByBuilding));
+    } catch(e) { console.warn('Cache save failed', e); }
   },
 
   load() {
-    // Все данные загружаются из Supabase — localStorage не используется
+    try {
+      const r = localStorage.getItem('ag_replace');
+      const b = localStorage.getItem('ag_blackout');
+      const n = localStorage.getItem('ag_notifs');
+      const l = localStorage.getItem('ag_lessons');
+      if (r) this.replaceRequests = JSON.parse(r);
+      if (b) this.blackoutDates   = JSON.parse(b);
+      if (n) this.notifications   = JSON.parse(n);
+      if (l) this.lessons         = JSON.parse(l);
+      const tbb = localStorage.getItem('ag_templateByBuilding');
+      if (tbb) {
+        this.activeTemplateByBuilding = JSON.parse(tbb);
+      } else {
+        // миграция со старого единого ключа
+        const at = localStorage.getItem('ag_activeTemplate');
+        if (at && at !== 'null') this.activeTemplateByBuilding['1'] = at;
+      }
+    } catch(e) { console.warn('Cache load failed', e); }
   }
 };
 
@@ -140,7 +163,7 @@ function addDuty(key, tid, dept = null, building = State.activeBuilding) {
     allEntries.push({ tid, dept: dept || null, building });
     State.duties[key] = allEntries;
     State.save();
-    if (sb) saveSchedule(key, tid, false, dept || '', building);
+    if (sb) saveSchedule(key, tid, false, dept || null, building);
   }
 }
 function removeDuty(key, tid, dept = null, building = State.activeBuilding) {
@@ -198,7 +221,6 @@ const DAYS_SHORT = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 const DAYS_FULL  = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 
 let toastTimer = null;
-let statsSearchText = '';
 function showToast(msg, type = 'info') {
   const el = document.getElementById('toast');
   if (!el) return;
@@ -489,13 +511,13 @@ function toggleReplaceRequest(key) {
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
-    if (sb) saveSchedule(key, teacher.id, false, '', State.activeBuilding);
+    if (sb) saveSchedule(key, teacher.id, false, null, State.activeBuilding);
     State.save();
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
     State.replaceRequests[key] = true;
-    if (sb) saveSchedule(key, teacher.id, true, '', State.activeBuilding);
+    if (sb) saveSchedule(key, teacher.id, true, null, State.activeBuilding);
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
@@ -1140,9 +1162,9 @@ const DEFAULT_DEPTS = [
   'Кафедра психологии и педагогики',
 ];
 function loadGlobalDepts() {
-  return [...DEFAULT_DEPTS];
+  try { const d = localStorage.getItem('ag_depts'); return d ? JSON.parse(d) : [...DEFAULT_DEPTS]; } catch { return [...DEFAULT_DEPTS]; }
 }
-function saveGlobalDepts(depts) { globalDepts = depts; }
+function saveGlobalDepts(depts) { try { localStorage.setItem('ag_depts', JSON.stringify(depts)); } catch {} }
 let globalDepts = loadGlobalDepts();
 let _modalDepts = [];
 function renderDeptManager(selected) {
@@ -1561,29 +1583,9 @@ function renderStats() {
   const maxD = getWorkdaysInMonth();
   const weekMap = {};
   const days = new Date(y, m + 1, 0).getDate();
-  for (let d = 1; d <= days; d++) { 
-    const key = dateKey(y, m, d); 
-    const wk = getWeekKeys(key)[0]; 
-    if (!weekMap[wk]) weekMap[wk] = getWeekKeys(key); 
-  }
-
-  const searchLower = statsSearchText.trim().toLowerCase();
-  const filteredTeachers = searchLower === ''
-    ? State.teachers
-    : State.teachers.filter(t => t.name.toLowerCase().includes(searchLower));
-
-  if (filteredTeachers.length === 0) {
-    grid.innerHTML = `<div class="empty-state">
-      <div class="empty-icon">🔍</div>
-      <p class="empty-title">Ничего не найдено</p>
-      <p class="empty-sub">Попробуйте изменить поисковый запрос</p>
-    </div>`;
-    return;
-  }
-
-  grid.innerHTML = filteredTeachers.map((t, idxOrig) => {
-    const originalIdx = State.teachers.findIndex(tt => tt.id === t.id);
-    const color = getColor(originalIdx);
+  for (let d = 1; d <= days; d++) { const key = dateKey(y, m, d); const wk = getWeekKeys(key)[0]; if (!weekMap[wk]) weekMap[wk] = getWeekKeys(key); }
+  grid.innerHTML = State.teachers.map((t, idx) => {
+    const color = getColor(idx);
     const monthCount = Object.keys(State.duties).filter(k => k.startsWith(prefix) && getDutyIds(k).includes(t.id)).length;
     const maxWeekLoad = Math.max(...Object.values(weekMap).map(wk => weekDutiesCount(t.id, wk)), 0);
     const replaceCount = Object.keys(State.replaceRequests).filter(k => getDutyIds(k).includes(t.id) && k.startsWith(prefix)).length;
@@ -1596,7 +1598,6 @@ function renderStats() {
     const statusLabel = { ok: '✓ Норма', warn: '⚠ Высокая нагрузка', over: '✕ Перебор смен' }[loadStatus];
     const pctClass = `stat-bar-pct--${loadStatus}`;
     const statusClass = `stat-status--${loadStatus}`;
-
     return `<div class="stat-card">
       <div class="stat-header">
         <div class="stat-avatar" style="background:${color}">${initials(t.name)}</div>
@@ -2048,7 +2049,7 @@ async function loadSchedule() { if (!sb) return; const { data, error } = await s
 function mapTeacherRow(r) { let depts = []; if (Array.isArray(r.depts) && r.depts.length) depts = r.depts; else if (r.dept) depts = [r.dept]; return { id: r.id, name: r.name, dept: depts[0] || '', depts: depts, phone: r.phone || '', maxLoad: r.max_load || 2, blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [], building: r.building || '1' }; }
 async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean); const { error } = await sb.from('teachers').upsert({ id: teacher.id, name: teacher.name, dept: depts[0] || '', depts: depts, phone: teacher.phone || '', max_load: teacher.maxLoad || 2, blackout_dates: State.blackoutDates[teacher.id] || [], building: teacher.building || '1' }, { onConflict: 'id' }); if (error) console.warn('[SB] saveTeachers error:', error.message); }
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
-async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || '', replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
+async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
 async function saveScheduleRemoveOne(key, teacherId, building = State.activeBuilding) { if (!sb) return; await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building); }
 async function saveScheduleBatch(rows) {
   if (!sb || !rows.length) return;
@@ -2291,14 +2292,6 @@ function init() {
   document.getElementById('notifBtn').addEventListener('click', e => { e.stopPropagation(); const panel = document.getElementById('notifPanel'); const btn = e.currentTarget; const rect = btn.getBoundingClientRect(); const isMob = window.innerWidth <= 760; if (isMob) { const pw = Math.min(300, window.innerWidth - 16); panel.style.width = pw + 'px'; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = 'auto'; panel.style.left = '8px'; } else { panel.style.width = ''; panel.style.left = ''; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = (window.innerWidth - rect.right) + 'px'; } panel.classList.toggle('open'); });
   document.addEventListener('click', e => { if (!e.target.closest('.notif-wrap')) document.getElementById('notifPanel').classList.remove('open'); });
   document.getElementById('notifClearAll').addEventListener('click', () => { State.notifications = []; State.save(); renderNotifications(); });
-    const statsSearchInput = document.getElementById('statsSearchInput');
-  if (statsSearchInput) {
-    statsSearchInput.value = statsSearchText;
-    statsSearchInput.addEventListener('input', (e) => {
-      statsSearchText = e.target.value;
-      renderStats();
-    });
-  }
   document.getElementById('addBlackoutBtn').addEventListener('click', addBlackoutDate);
   const sbClose = document.getElementById('sbStatusClose'); if (sbClose) sbClose.addEventListener('click', () => { document.getElementById('sbStatusbar').classList.add('hidden'); });
   document.querySelectorAll('.building-tab').forEach(btn => {
@@ -2308,7 +2301,6 @@ function init() {
     if (State.currentRole === 'admin') {
       await loadSchedule();
       await loadLessons();
-      await loadTemplatesList();
       renderCalendar();
       renderAccordion();
     } else {
