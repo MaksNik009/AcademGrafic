@@ -381,6 +381,12 @@ function renderCalendar() {
     if (myBlackout) cell.classList.add('day-cell--blackout');
     if (isReplaceReq) cell.classList.add('day-cell--replace-req');
 
+    // Для АДМИНА: если хотя бы один из дежурных пометил этот день нежелательным — красный индикатор конфликта
+    if (State.currentRole === 'admin') {
+      const hasBlackoutConflict = dutyEntries.some(e => (State.blackoutDates[e.tid] || []).includes(key));
+      if (hasBlackoutConflict) cell.classList.add('day-cell--blackout');
+    }
+
     if (!isHoliday) {
       cell.setAttribute('role', 'button');
       cell.setAttribute('tabindex', '0');
@@ -422,6 +428,23 @@ function renderCalendar() {
           const s = document.createElement('div'); s.className='cell-strip cell-strip--duty'; stripWrap.appendChild(s);
         }
         cell.appendChild(stripWrap);
+      }
+      // Показываем аватарку и ФИО дежурного (как у завуча, но без редактирования)
+      if (dutyEntries.length > 0) {
+        const first = dutyEntries[0];
+        const t = teacherById(first.tid);
+        if (t) {
+          const color = getColor(teacherIndex(first.tid));
+          const chip = document.createElement('div'); chip.className='cell-duty-chip';
+          const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
+          const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
+          chip.appendChild(av); chip.appendChild(nameEl);
+          cell.appendChild(chip);
+          if (dutyEntries.length > 1) {
+            const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
+            cell.appendChild(more);
+          }
+        }
       }
     }
 
@@ -818,11 +841,10 @@ function renderDayPanel(key) {
       ? validEntries.map((e, i) => {
           const t = teacherById(e.tid);
           const color = getColor(teacherIndex(e.tid));
-          const isBlackout = (State.blackoutDates[e.tid] || []).includes(key);
-          return `<div class="pair-teacher-row" style="${isBlackout ? 'background:rgba(192,57,43,0.09);border-radius:7px;' : ''}">
+          return `<div class="pair-teacher-row">
             <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">${initials(t.name)}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:.82rem;font-weight:600;color:${isBlackout ? '#c0392b' : 'var(--navy)'};display:flex;align-items:center;gap:4px">${t.name.split(' ').slice(0,2).join(' ')}${isBlackout ? ' <span title="Нежелательная дата">🚫</span>' : ''}</div>
+              <div style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</div>
               <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono)">${e.dept || t.dept || ''}${e.room ? ' · 🚪 ' + e.room : ''}</div>
             </div>
             ${isAdmin ? `<button class="pair-remove-btn" onclick="removePairEntry('${key}',${p.n},${i})" title="Удалить">✕</button>` : ''}
@@ -855,25 +877,6 @@ function renderDayPanel(key) {
       </div>
     </details>`;
   }).join('');
-
-  // Блок нежелательных дат — после всех 6 пар
-  const blackoutTeachers = State.teachers.filter(t =>
-    t.building === State.activeBuilding && (State.blackoutDates[t.id] || []).includes(key)
-  );
-  if (blackoutTeachers.length > 0) {
-    const blDiv = document.createElement('div');
-    blDiv.style.cssText = 'margin-top:14px;border:2px solid #e74c3c;border-radius:10px;padding:10px 14px;background:#fff5f5;';
-    blDiv.innerHTML = `<div style="font-size:.78rem;font-weight:700;color:#c0392b;margin-bottom:8px;display:flex;align-items:center;gap:5px">🚫 Нежелательная дата для:</div>` +
-      blackoutTeachers.map(t => {
-        const color = getColor(teacherIndex(t.id));
-        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <div style="width:24px;height:24px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
-          <span style="font-size:.82rem;font-weight:600;color:#c0392b">${t.name}</span>
-          <span style="font-size:.72rem;color:var(--text-muted)">${t.dept || ''}</span>
-        </div>`;
-      }).join('');
-    pairsEl.appendChild(blDiv);
-  }
 }
 function removeDutyFromPanel(key, tid, dept) {
   removeDuty(key, tid, dept || null);
@@ -928,21 +931,8 @@ function addPairEntry(key, pairN) {
   if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 function removePairEntry(key, pairN, idx) {
-  const all = (State.lessons[key]?.[pairN]) || [];
-  let buildingCount = 0;
-  let realIdx = -1;
-  for (let i = 0; i < all.length; i++) {
-    if (all[i].building === State.activeBuilding) {
-      if (buildingCount === idx) { realIdx = i; break; }
-      buildingCount++;
-    }
-  }
-  if (realIdx === -1) return;
-  all.splice(realIdx, 1);
-  if (all.length === 0) {
-    delete State.lessons[key][pairN];
-    if (Object.keys(State.lessons[key]).length === 0) delete State.lessons[key];
-  }
+  const entries = getPairEntries(key, pairN);
+  entries.splice(idx, 1);
   State.save();
   renderDayPanel(key);
   saveLessonsBatch(key, State.lessons[key] || {});
@@ -1404,15 +1394,12 @@ function saveTeacherModal() {
       Object.assign(t, { name, dept, depts, phone, maxLoad, building });
       State.blackoutDates[editId] = [...(_modalBlackouts || [])];
       t.blackoutDates = State.blackoutDates[editId];
-      if (sb) saveTeachers(t);
     }
     showToast('Данные обновлены', 'success');
   } else {
     const newId = 't_' + Date.now();
-    const newT = { id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] };
-    State.teachers.push(newT);
+    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] });
     State.blackoutDates[newId] = [...(_modalBlackouts || [])];
-    if (sb) saveTeachers(newT);
     showToast(`${name} добавлен(а)`, 'success');
   }
   _modalBlackouts = [];
@@ -1724,8 +1711,6 @@ function renderMyCabinet() {
     blEl.querySelectorAll('.blackout-remove').forEach(b => {
       b.addEventListener('click', () => {
         State.blackoutDates[tid] = (State.blackoutDates[tid] || []).filter(k => k !== b.dataset.k);
-        const t = State.teachers.find(t => t.id === tid);
-        if (t) { t.blackoutDates = State.blackoutDates[tid]; if (sb) saveTeachers(t); }
         State.save();
         renderMyCabinet(); renderCalendar(); renderAccordion();
         showToast('Дата удалена', 'info');
@@ -1742,8 +1727,6 @@ function addBlackoutDate() {
   if (!State.blackoutDates[tid]) State.blackoutDates[tid] = [];
   if (State.blackoutDates[tid].includes(val)) { showToast('Уже добавлено', 'info'); return; }
   State.blackoutDates[tid].push(val);
-  const t = State.teachers.find(t => t.id === tid);
-  if (t) { t.blackoutDates = State.blackoutDates[tid]; if (sb) saveTeachers(t); }
   State.save();
   input.value = '';
   renderMyCabinet(); renderCalendar(); renderAccordion();
