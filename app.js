@@ -307,7 +307,7 @@ function renderCalendar() {
     const isToday = key === today;
     const isPast = key < today;
     // Замена видна только в том корпусе, где её запросили
-    const isReplaceReq = State.replaceRequests[key] === State.activeBuilding;
+    const isReplaceReq = !!(State.replaceRequests[key]?.building === State.activeBuilding) && getDutyEntries(key).length > 0;
     const tid = State.currentTeacherId;
     const myBlackout = tid && (State.blackoutDates[tid] || []).includes(key);
     
@@ -409,7 +409,7 @@ function renderCalendar() {
     if (State.currentRole === 'teacher') {
       const hasLesson    = pairTeacherIds.has(State.currentTeacherId);
       const isDuty       = dutyEntries.some(e => e.tid === State.currentTeacherId);
-      const isReplace    = isDuty && (State.replaceRequests[key] === State.activeBuilding);
+      const isReplace    = isDuty && State.replaceRequests[key]?.tid === State.currentTeacherId;
       const isMyBlackout = !!(State.currentTeacherId && (State.blackoutDates[State.currentTeacherId] || []).includes(key));
 
       // Полоски строго в порядке: зелёный(пары) → фиолетовый(дежурный) → оранжевый(замена) → красный(нежелательный)
@@ -511,25 +511,57 @@ function quickClear(key) {
   showToast('Дежурство снято', 'info');
 }
 function toggleReplaceRequest(key) {
+  const tid = State.currentTeacherId;
   const ids = getDutyIds(key);
-  if (!ids.length) return;
-  const teacher = teacherById(State.currentTeacherId && ids.includes(State.currentTeacherId) ? State.currentTeacherId : ids[0]);
+  // Только если этот преподаватель стоит в дежурстве
+  if (!tid || !ids.includes(tid)) { showToast('Вы не дежурите в этот день', 'error'); return; }
+  const teacher = teacherById(tid);
+  if (!teacher) return;
   const [, mm, dd] = key.split('-');
   const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
-  if (State.replaceRequests[key]) {
+  // Находим реальный dept этого преподавателя
+  const v = State.duties[key];
+  const allEntries = v ? (Array.isArray(v) ? v : [v]) : [];
+  const myEntry = allEntries.find(e => e.tid === tid && e.building === State.activeBuilding);
+  const dept = myEntry?.dept || '';
+  if (State.replaceRequests[key]?.tid === tid) {
     delete State.replaceRequests[key];
-    if (sb) saveSchedule(key, teacher.id, false, '', State.activeBuilding);
-    State.save();
-    renderCalendar(); renderAccordion(); renderMyCabinet();
+    if (sb) sb.from('schedule').update({ replace_request: false })
+      .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding)
+      .then(({ error }) => { if (error) console.warn('[SB] replace off:', error.message); });
+    State.save(); renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отменён', 'info');
   } else {
-    State.replaceRequests[key] = State.activeBuilding;
-    if (sb) saveSchedule(key, teacher.id, true, '', State.activeBuilding);
+    State.replaceRequests[key] = { tid, building: State.activeBuilding };
+    if (!State.declinedRequests) State.declinedRequests = {};
+    delete State.declinedRequests[key];
+    if (sb) sb.from('schedule').update({ replace_request: true })
+      .eq('date_key', key).eq('teacher_id', tid).eq('building', State.activeBuilding)
+      .then(({ error }) => { if (error) console.warn('[SB] replace on:', error.message); });
     State.save();
     addNotification(`🔄 ${teacher.name} просит замену ${dayLabel}`, '🔄');
     renderCalendar(); renderAccordion(); renderMyCabinet();
     showToast('Запрос на замену отправлен 🔔', 'warn');
   }
+}
+
+// Завуч отклоняет запрос на замену
+function declineReplaceRequest(key) {
+  const req = State.replaceRequests[key];
+  if (!req) return;
+  const teacher = teacherById(req.tid);
+  delete State.replaceRequests[key];
+  if (sb) sb.from('schedule').update({ replace_request: false })
+    .eq('date_key', key).eq('teacher_id', req.tid).eq('building', req.building)
+    .then(({ error }) => { if (error) console.warn('[SB] decline:', error.message); });
+  if (!State.declinedRequests) State.declinedRequests = {};
+  State.declinedRequests[key] = true;
+  State.save();
+  const [, mm, dd] = key.split('-');
+  const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
+  if (teacher) addNotification(`❌ Замена ${dayLabel} отклонена (${teacher.name})`, '❌');
+  renderCalendar(); renderAccordion(); renderMyCabinet();
+  showToast('Запрос на замену отклонён', 'info');
 }
 
 // ─── MOBILE ACCORDION ────────────────────────────────────────────────────────
@@ -567,7 +599,7 @@ function renderAccordion() {
       if (dow === 0) return;
       const isHoliday = !!getHolidayName(key);
       const isToday = key === today;
-      const isReplace = State.replaceRequests[key] === State.activeBuilding;
+      const isReplace = State.replaceRequests[key]?.building === State.activeBuilding;
       const dutyEntries = getDutyEntries(key);
       const dutyIds = dutyEntries.map(e => e.tid);
       const tid = State.currentTeacherId;
@@ -588,12 +620,18 @@ function renderAccordion() {
           const color = getColor(idx);
           const isMyDutyHere = entry.tid === tid;
           const deptLabel = entry.dept || teacher.dept || '';
-          const replaceBadge = (isReplace && isMyDutyHere)
-            ? '<div style="font-size:.68rem;color:var(--orange);margin-top:3px">🔄 Просит замену</div>' : '';
+          const reqTid = State.replaceRequests[key]?.tid;
+          const isThisTeacherRequesting = isReplace && entry.tid === reqTid;
+          const replaceBadge = isThisTeacherRequesting
+            ? `<div style="font-size:.68rem;color:var(--orange);margin-top:3px;display:flex;align-items:center;gap:5px">🔄 Просит замену${
+                State.currentRole === 'admin'
+                  ? `<button onclick="event.stopPropagation();declineReplaceRequest('${key}')" style="font-size:.62rem;padding:1px 7px;background:#e74c3c;color:#fff;border:none;border-radius:4px;cursor:pointer;margin-left:2px">Отклонить</button>`
+                  : ''
+              }</div>` : '';
           const removeBtn = State.currentRole === 'admin'
             ? `<button class="acc-remove-duty mob-only" data-remove-tid="${entry.tid}" data-remove-dept="${entry.dept||''}" data-remove-key="${key}" title="Убрать дежурного">✕</button>`
             : '';
-          return `<div class="acc-duty-chip${isReplace && isMyDutyHere ? ' replace' : ''}"
+          return `<div class="acc-duty-chip${isThisTeacherRequesting ? ' replace' : ''}"
                style="border-left-color:${color};background:${color}12;border-color:${color}40;margin-bottom:4px;position:relative">
             ${removeBtn}
             <div class="acc-duty-name">${teacher.name}</div>
@@ -611,7 +649,7 @@ function renderAccordion() {
         if (State.currentRole === 'admin') {
           actionBtn = `<button class="acc-action-btn" data-action="assign" data-key="${key}">+</button>`;
         } else if (State.currentRole === 'teacher' && dutyIds.includes(tid)) {
-          const isReq = State.replaceRequests[key] === State.activeBuilding;
+          const isReq = State.replaceRequests[key]?.tid === tid;
           actionBtn = `<button class="acc-action-btn orange-btn" data-action="toggle-replace" data-key="${key}">${isReq ? '↩' : '🔄'}</button>`;
         }
       }
@@ -824,9 +862,14 @@ function renderDayPanel(key) {
         const t = teacherById(e.tid);
         if (!t) return '';
         const color = getColor(teacherIndex(e.tid));
-        return `<div style="display:flex;align-items:center;gap:5px;background:${color}14;border:1px solid ${color}40;border-radius:20px;padding:3px 10px 3px 4px;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">
+        const isThisReq = State.replaceRequests[key]?.tid === e.tid;
+        const replaceTag = isThisReq ? `<span style="font-size:.65rem;color:var(--orange);margin-left:1px">🔄</span>` : '';
+        const declineBtn = (isAdmin && isThisReq)
+          ? `<button onclick="event.stopPropagation();declineReplaceRequest('${key}')" style="background:#e74c3c;border:none;color:#fff;font-size:.6rem;padding:1px 6px;border-radius:4px;cursor:pointer;margin-left:2px">Отклонить</button>` : '';
+        return `<div style="display:flex;align-items:center;gap:5px;background:${isThisReq ? 'rgba(230,126,34,0.10)' : color+'14'};border:1px solid ${isThisReq ? 'var(--orange)' : color+'40'};border-radius:20px;padding:3px 10px 3px 4px;cursor:pointer" onclick="openTeacherInfoModal('${e.tid}')">
           <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
           <span style="font-size:.75rem;font-weight:500;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</span>
+          ${replaceTag}${declineBtn}
           ${isAdmin ? `<button onclick="event.stopPropagation();removeDutyFromPanel('${key}','${e.tid}','${e.dept||''}')" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:.8rem;padding:0 0 0 2px" title="Убрать">✕</button>` : ''}
         </div>`;
       }).join('') +
@@ -937,8 +980,20 @@ function addPairEntry(key, pairN) {
   if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 function removePairEntry(key, pairN, idx) {
-  const entries = getPairEntries(key, pairN);
-  entries.splice(idx, 1);
+  const all = (State.lessons[key]?.[pairN]) || [];
+  let cnt = 0, realIdx = -1;
+  for (let i = 0; i < all.length; i++) {
+    if (all[i].building === State.activeBuilding) {
+      if (cnt === idx) { realIdx = i; break; }
+      cnt++;
+    }
+  }
+  if (realIdx === -1) return;
+  all.splice(realIdx, 1);
+  if (!all.length) {
+    delete State.lessons[key][pairN];
+    if (!Object.keys(State.lessons[key]).length) delete State.lessons[key];
+  }
   State.save();
   renderDayPanel(key);
   saveLessonsBatch(key, State.lessons[key] || {});
@@ -1692,10 +1747,11 @@ function renderMyCabinet() {
     listEl.innerHTML = myDuties.map(key => {
       const d = new Date(key + 'T00:00:00');
       const dayStr = `${d.getDate()} ${MONTHS_RU_GEN[d.getMonth()]}`;
-      const isReq = State.replaceRequests[key] === State.activeBuilding;
+      const isReq = State.replaceRequests[key]?.tid === State.currentTeacherId;
+      const isDeclined = !isReq && !!(State.declinedRequests?.[key]);
       return `<div class="my-duty-row">
         <div class="my-duty-date">${dayStr}, ${DAYS_SHORT[d.getDay()]}</div>
-        <div class="my-duty-status${isReq ? ' replace' : ''}">${isReq ? '🔄 Запрошена замена' : '✓ Запланировано'}</div>
+        <div class="my-duty-status${isReq ? ' replace' : isDeclined ? ' declined' : ''}">${isReq ? '🔄 Запрошена замена' : isDeclined ? '❌ Замена отклонена' : '✓ Запланировано'}</div>
         <button class="my-duty-action${isReq ? ' cancel' : ''}" data-key="${key}">
           ${isReq ? 'Отменить' : '🔄 Запросить замену'}
         </button>
@@ -2073,7 +2129,7 @@ async function initSupabase() {
   }
 }
 async function loadTeachers() { if (!sb) return; const { data, error } = await sb.from('teachers').select('*').order('name'); if (error) { console.warn('[SB] loadTeachers error:', error.message); return; } if (!data || data.length === 0) return; State.teachers = data.map(mapTeacherRow); State.blackoutDates = {}; State.teachers.forEach(t => { if (t.blackoutDates?.length) State.blackoutDates[t.id] = t.blackoutDates; }); State.save(); renderTeachersList(); }
-async function loadSchedule() { if (!sb) return; const { data, error } = await sb.from('schedule').select('date_key, teacher_id, dept, replace_request, building'); if (error) { console.warn('[SB] loadSchedule error:', error.message); return; } State.duties = {}; State.replaceRequests = {}; (data || []).forEach(r => { if (r.teacher_id) { if (!State.duties[r.date_key]) State.duties[r.date_key] = []; const entry = { tid: r.teacher_id, dept: r.dept || null, building: r.building || '1' }; if (!State.duties[r.date_key].some(e => e.tid === entry.tid && e.dept === entry.dept && e.building === entry.building)) State.duties[r.date_key].push(entry); } if (r.replace_request) State.replaceRequests[r.date_key] = r.building || '1'; }); State.save(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet(); }
+async function loadSchedule() { if (!sb) return; const { data, error } = await sb.from('schedule').select('date_key, teacher_id, dept, replace_request, building'); if (error) { console.warn('[SB] loadSchedule error:', error.message); return; } State.duties = {}; State.replaceRequests = {}; (data || []).forEach(r => { if (r.teacher_id) { if (!State.duties[r.date_key]) State.duties[r.date_key] = []; const entry = { tid: r.teacher_id, dept: r.dept || null, building: r.building || '1' }; if (!State.duties[r.date_key].some(e => e.tid === entry.tid && e.dept === entry.dept && e.building === entry.building)) State.duties[r.date_key].push(entry); } if (r.replace_request) State.replaceRequests[r.date_key] = { tid: r.teacher_id, building: r.building || '1' }; }); State.save(); renderCalendar(); renderAccordion(); renderStats(); renderMyCabinet(); }
 function mapTeacherRow(r) { let depts = []; if (Array.isArray(r.depts) && r.depts.length) depts = r.depts; else if (r.dept) depts = [r.dept]; return { id: r.id, name: r.name, dept: depts[0] || '', depts: depts, phone: r.phone || '', maxLoad: r.max_load || 2, blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [], building: r.building || '1' }; }
 async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean); const { error } = await sb.from('teachers').upsert({ id: teacher.id, name: teacher.name, dept: depts[0] || '', depts: depts, phone: teacher.phone || '', max_load: teacher.maxLoad || 2, blackout_dates: State.blackoutDates[teacher.id] || [], building: teacher.building || '1' }, { onConflict: 'id' }); if (error) console.warn('[SB] saveTeachers error:', error.message); }
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
@@ -2113,7 +2169,7 @@ async function loadLessons() { if (!sb) return; const y = State.currentDate.getF
 async function saveLessonsBatch(key, lessons) { if (!sb) return; await sb.from('lessons').delete().eq('date_key', key); const rows = []; [1,2,3,4,5,6].forEach(pn => { (lessons[pn] || []).forEach(e => { rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '', building: e.building || State.activeBuilding }); }); }); if (rows.length) await sb.from('lessons').insert(rows); }
 function subscribeRealtime() { if (!sb || sbChannel) return; sbChannel = sb.channel('ag-realtime-v6').on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange).on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, onTeacherChange).on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, onLessonsChange).subscribe(status => { if (status === 'SUBSCRIBED') setSbStatus('connected', 'подключено · Realtime ⚡'); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { setSbStatus('error', 'Realtime: ошибка канала'); setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000); } else if (status === 'CLOSED') { sbChannel = null; setSbStatus('error', 'Realtime: канал закрыт'); } }); }
 function onLessonsChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { if (sb) { sb.from('lessons').select('pair_num, teacher_id, dept, room, building').eq('date_key', key).then(({ data }) => { State.lessons[key] = {}; (data || []).forEach(r => { if (!State.lessons[key][r.pair_num]) State.lessons[key][r.pair_num] = []; State.lessons[key][r.pair_num].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); if (State.activeDayKey === key) renderDayPanel(key); }); } } else { const pn = row.pair_num; if (!State.lessons[key]) State.lessons[key] = {}; if (!State.lessons[key][pn]) State.lessons[key][pn] = []; const exists = State.lessons[key][pn].some(e => e.tid === row.teacher_id && e.room === row.room); if (!exists) State.lessons[key][pn].push({ tid: row.teacher_id, dept: row.dept || '', room: row.room || '', building: row.building || '1' }); if (State.activeDayKey === key) renderDayPanel(key); } renderCalendar(); }
-function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = row.building || '1'; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
+function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = { tid: row.teacher_id, building: row.building || '1' }; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
 function onTeacherChange({ eventType, new: row, old: oldRow }) { if (eventType === 'DELETE') { State.teachers = State.teachers.filter(t => t.id !== oldRow.id); } else { const mapped = mapTeacherRow(row); const idx = State.teachers.findIndex(t => t.id === row.id); if (idx >= 0) State.teachers[idx] = { ...State.teachers[idx], ...mapped }; else State.teachers.push(mapped); if (mapped.blackoutDates?.length) State.blackoutDates[mapped.id] = mapped.blackoutDates; } State.save(); renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); }
 function flashCell(key) { const cell = document.querySelector(`.day-cell[data-key="${key}"]`); if (!cell) return; cell.classList.remove('rt-flash'); void cell.offsetWidth; cell.classList.add('rt-flash'); setTimeout(() => cell.classList.remove('rt-flash'), 900); }
 
