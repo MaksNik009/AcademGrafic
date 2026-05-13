@@ -2025,7 +2025,3 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
   padding: 0 1rem;
   white-space: nowrap;
 }
-/* Принудительно белый цвет номера текущего дня */
-.day-cell--today .day-num {
-  color: #ffffff !important;
-}

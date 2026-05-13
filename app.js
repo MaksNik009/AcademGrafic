@@ -60,9 +60,7 @@ const State = {
   modalMode: 'assign',
   activeDayKey: null,
   activeBuilding: '1',
-  activeTemplateByBuilding: {},
-  get activeTemplateId() { return this.activeTemplateByBuilding[this.activeBuilding] || null; },
-  set activeTemplateId(v) { this.activeTemplateByBuilding[this.activeBuilding] = v || null; },
+  activeTemplateId: null,
 
   avatarColors: [
     '#2C6FAC','#1A7A4A','#8E44AD','#C0392B',
@@ -76,7 +74,7 @@ const State = {
       localStorage.setItem('ag_blackout',  JSON.stringify(this.blackoutDates));
       localStorage.setItem('ag_notifs',    JSON.stringify(this.notifications));
       localStorage.setItem('ag_lessons',   JSON.stringify(this.lessons));
-      localStorage.setItem('ag_templateByBuilding', JSON.stringify(this.activeTemplateByBuilding));
+      localStorage.setItem('ag_activeTemplate', this.activeTemplateId || '');
     } catch(e) { console.warn('Cache save failed', e); }
   },
 
@@ -86,18 +84,12 @@ const State = {
       const b = localStorage.getItem('ag_blackout');
       const n = localStorage.getItem('ag_notifs');
       const l = localStorage.getItem('ag_lessons');
+      const at = localStorage.getItem('ag_activeTemplate');
       if (r) this.replaceRequests = JSON.parse(r);
       if (b) this.blackoutDates   = JSON.parse(b);
       if (n) this.notifications   = JSON.parse(n);
       if (l) this.lessons         = JSON.parse(l);
-      const tbb = localStorage.getItem('ag_templateByBuilding');
-      if (tbb) {
-        this.activeTemplateByBuilding = JSON.parse(tbb);
-      } else {
-        // миграция со старого единого ключа
-        const at = localStorage.getItem('ag_activeTemplate');
-        if (at && at !== 'null') this.activeTemplateByBuilding['1'] = at;
-      }
+      if (at && at !== 'null') this.activeTemplateId = at;
     } catch(e) { console.warn('Cache load failed', e); }
   }
 };
@@ -156,32 +148,34 @@ function getDutyIds(key) {
   return getDutyEntries(key).map(e => e.tid);
 }
 function addDuty(key, tid, dept = null, building = State.activeBuilding) {
-  const v = State.duties[key];
-  const allEntries = v ? (Array.isArray(v) ? v : [v]).map(normEntry) : [];
-  const already = allEntries.some(e => e.tid === tid && e.building === building && (e.dept || null) === (dept || null));
+  const entries = getDutyEntries(key);
+  const already = entries.some(e => e.tid === tid && (e.dept || null) === (dept || null));
   if (!already) {
-    allEntries.push({ tid, dept: dept || null, building });
-    State.duties[key] = allEntries;
+    entries.push({ tid, dept: dept || null, building });
+    State.duties[key] = entries;
     State.save();
-    if (sb) saveSchedule(key, tid, false, dept || null, building);
+    // ★ Сохраняем в Supabase
+    if (sb && !_batchMode) saveSchedule(key, tid, false, dept || null, building);
   }
 }
-function removeDuty(key, tid, dept = null, building = State.activeBuilding) {
-  const v = State.duties[key];
-  const allEntries = v ? (Array.isArray(v) ? v : [v]).map(normEntry) : [];
-  const filtered = allEntries.filter(e => !(e.tid === tid && e.building === building && (dept === null || e.dept === dept)));
-  if (filtered.length) State.duties[key] = filtered;
+function removeDuty(key, tid, dept = null) {
+  const entries = getDutyEntries(key).filter(e => !(e.tid === tid && (dept === null || e.dept === dept)));
+  if (entries.length) State.duties[key] = entries;
   else delete State.duties[key];
   State.save();
-  if (sb) saveScheduleRemoveOne(key, tid, building);
+  // ★ Удаляем из Supabase, указывая building
+  if (sb && !_batchMode) saveScheduleRemoveOne(key, tid, State.activeBuilding);
 }
 function clearDutyDay(key) {
   delete State.duties[key];
   delete State.replaceRequests[key];
   State.save();
+  // ★ Удаляем все записи этого дня для текущего корпуса
   if (sb) {
     sb.from('schedule').delete().eq('date_key', key).eq('building', State.activeBuilding);
   }
+  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
+  showToast('Дежурство снято', 'info');
 }
 function weekDutiesCount(tid, weekKeys) {
   let cnt = 0;
@@ -335,8 +329,8 @@ function renderCalendar() {
     const cell = document.createElement('div');
     cell.className = 'day-cell';
     cell.dataset.key = key;
-
-    // ----- ВОСКРЕСЕНЬЕ -----
+    
+    // -------- БАЗОВЫЕ КЛАССЫ ----------
     if (isSunday) {
       cell.classList.add('day-cell--sunday');
       if (State.currentRole === 'admin') {
@@ -348,45 +342,7 @@ function renderCalendar() {
         cell.style.cursor = 'not-allowed';
         cell.style.pointerEvents = 'none';
       }
-      const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
-      cell.appendChild(num);
-      const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
-      cell.appendChild(sunLabel);
-      // для админа показываем дежурных или +
-      if (State.currentRole === 'admin') {
-        const dutyEntries = getDutyEntries(key);
-        if (dutyEntries.length === 0) {
-          const hint = document.createElement('div'); hint.className='add-hint'; hint.textContent='+';
-          cell.appendChild(hint);
-        } else {
-          const first = dutyEntries[0];
-          const t = teacherById(first.tid);
-          if (t) {
-            const color = getColor(teacherIndex(first.tid));
-            const chip = document.createElement('div'); chip.className='cell-duty-chip';
-            const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
-            av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(first.tid); });
-            const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
-            chip.appendChild(av); chip.appendChild(nameEl);
-            cell.appendChild(chip);
-            if (dutyEntries.length > 1) {
-              const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
-              cell.appendChild(more);
-            }
-          }
-        }
-      }
-      // Обработчик клика для воскресенья (админ)
-      if (State.currentRole === 'admin') {
-        cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
-        cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
-      }
-      grid.appendChild(cell);
-      continue;  // переходим к следующему дню
     }
-
-    // ----- НЕ ВОСКРЕСЕНЬЕ -----
-    // ПРАЗДНИКИ
     if (isHoliday) {
       cell.classList.add('day-cell--holiday');
       if (State.currentRole !== 'admin') {
@@ -396,21 +352,21 @@ function renderCalendar() {
         cell.setAttribute('title', `Праздничный день (${getHolidayName(key)}) — можно назначить вручную`);
       }
     }
-
     if (isSaturday) cell.classList.add('day-cell--saturday');
     if (isToday)    cell.classList.add('day-cell--today');
     if (isPast)     cell.classList.add('day-cell--past');
     if (myBlackout) cell.classList.add('day-cell--blackout');
     if (isReplaceReq) cell.classList.add('day-cell--replace-req');
-
-    if (!isHoliday) {
-      cell.setAttribute('role', 'button');
-      cell.setAttribute('tabindex', '0');
-    }
-
+    
+    // -------- НОМЕР ДНЯ ----------
     const num = document.createElement('div'); num.className='day-num'; num.textContent=d;
     cell.appendChild(num);
-    if (isHoliday) {
+    
+    // -------- МЕТКИ (для воскресенья и праздников) ----------
+    if (isSunday) {
+      const sunLabel = document.createElement('div'); sunLabel.className='holiday-label'; sunLabel.textContent='Выходной';
+      cell.appendChild(sunLabel);
+    } else if (isHoliday) {
       const hl = document.createElement('div'); hl.className='holiday-label'; hl.textContent=getHolidayName(key);
       cell.appendChild(hl);
     }
@@ -418,7 +374,8 @@ function renderCalendar() {
       const bi = document.createElement('div'); bi.className='blackout-indicator'; bi.textContent='🚫 нежелательный';
       cell.appendChild(bi);
     }
-
+    
+    // -------- ПОЛУЧАЕМ ДЕЖУРНЫХ И ПАРЫ ----------
     const dutyEntries = getDutyEntries(key);
     const pairTeacherIds = new Set();
     if (State.lessons[key]) {
@@ -428,9 +385,9 @@ function renderCalendar() {
         });
       }
     }
-
-    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник)
-    if (!isHoliday && State.currentRole === 'teacher') {
+    
+    // ── РЕЖИМ УЧИТЕЛЯ (только если не праздник и не воскресенье) ──
+    if (State.currentRole === 'teacher' && !isHoliday && !isSunday) {
       const hasLesson = pairTeacherIds.has(State.currentTeacherId);
       const isDuty    = dutyEntries.some(e => e.tid === State.currentTeacherId);
       if (hasLesson || isDuty) {
@@ -447,7 +404,7 @@ function renderCalendar() {
       }
     }
 
-    // ── РЕЖИМ АДМИНИСТРАТОРА
+    // ── РЕЖИМ АДМИНИСТРАТОРА (всегда отображаем дежурных, даже в праздник/воскресенье) ──
     if (State.currentRole === 'admin') {
       if (dutyEntries.length > 0) {
         const first = dutyEntries[0];
@@ -470,12 +427,19 @@ function renderCalendar() {
         cell.appendChild(hint);
       }
     }
-
-    // Обработчики кликов (для админа – все дни, для учителя – только не праздники)
-    if (!isHoliday || State.currentRole === 'admin') {
+    
+    // ── ОБРАБОТЧИКИ КЛИКОВ ──
+    // Для учителя: только обычные рабочие дни (не праздник, не воскресенье)
+    if (State.currentRole === 'teacher' && !isHoliday && !isSunday) {
       cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
       cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
     }
+    // Для администратора: любые дни (включая воскресенье и праздники)
+    if (State.currentRole === 'admin') {
+      cell.addEventListener('click', (e) => { if (!e.target.closest('.cell-duty-avatar')) openDayPanel(key); });
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDayPanel(key); } });
+    }
+    
     grid.appendChild(cell);
   }
 }
@@ -491,6 +455,7 @@ function handleChipAction(action, key, tid, actionBtn) {
     State.save();
     renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
     showToast('Преподаватель снят с дежурства', 'info');
+    saveScheduleRemoveOne(key, tid);
   } else if (action === 'replace') {
     openModal(key, kd, km - 1, ky, 'assign');
   } else if (action === 'toggle-replace') {
@@ -508,7 +473,7 @@ function toggleReplaceRequest(key) {
   if (!ids.length) return;
   const teacher = teacherById(State.currentTeacherId && ids.includes(State.currentTeacherId) ? State.currentTeacherId : ids[0]);
   const [, mm, dd] = key.split('-');
-  const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`;
+  const dayLabel = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm)-1]}`;
   if (State.replaceRequests[key]) {
     delete State.replaceRequests[key];
     if (sb) saveSchedule(key, teacher.id, false, null, State.activeBuilding);
@@ -633,6 +598,7 @@ function renderAccordion() {
           State.save();
           renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
           showToast('Дежурный снят', 'info');
+          if (typeof saveScheduleRemoveOne === 'function') saveScheduleRemoveOne(k, rtid);
         });
       });
       body.appendChild(row);
@@ -794,24 +760,29 @@ function renderDayPanel(key) {
   if (!panel) return;
   const [y, mm, dd] = key.split('-').map(Number);
   const dateObj = new Date(y, mm - 1, dd);
+  const isSunday = dateObj.getDay() === 0;
   const dayName = DAYS_FULL[dateObj.getDay()];
   const dateLabel = `${dd} ${MONTHS_RU_GEN[mm - 1]} ${y}`;
   const isHoliday = !!getHolidayName(key);
-  const isSunday = dateObj.getDay() === 0;
   const dutyEntries = getDutyEntries(key);
   const isAdmin = State.currentRole === 'admin';
+
   panel.querySelector('.day-panel-title').textContent = `${dayName}, ${dateLabel}`;
   const dutyStrip = panel.querySelector('.day-panel-duty-strip');
-  let bannerHtml = '';
+  let dutyHtml = '';
+
+  // ★ Показываем уведомление для воскресенья (если не праздник)
   if (isSunday && !isHoliday) {
-    bannerHtml = `<div class="day-panel-sunday">📅 Воскресенье (выходной)</div>`;
-  } else if (isHoliday) {
-    bannerHtml = `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
+    dutyHtml += `<div class="day-panel-sunday">📅 Воскресенье (выходной)</div>`;
+  }
+  // Показываем праздник (если есть)
+  if (isHoliday) {
+    dutyHtml += `<div class="day-panel-holiday">🏛 ${getHolidayName(key)}</div>`;
   }
 
+  // Блок дежурных
   if (dutyEntries.length > 0) {
-    dutyStrip.innerHTML = bannerHtml +
-      `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
+    dutyHtml += `<div style="font-size:.72rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Дежурные</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">` +
       dutyEntries.map(e => {
         const t = teacherById(e.tid);
@@ -822,16 +793,19 @@ function renderDayPanel(key) {
           <span style="font-size:.75rem;font-weight:500;color:var(--navy)">${t.name.split(' ').slice(0,2).join(' ')}</span>
           ${isAdmin ? `<button onclick="event.stopPropagation();removeDutyFromPanel('${key}','${e.tid}','${e.dept||''}')" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:.8rem;padding:0 0 0 2px" title="Убрать">✕</button>` : ''}
         </div>`;
-      }).join('') +
-      `</div>` +
-      (isAdmin ? `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>` : '');
-  } else {
-    let emptyMessage = `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
+      }).join('') + `</div>`;
     if (isAdmin) {
-      emptyMessage += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
+      dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Добавить дежурного</button>`;
     }
-    dutyStrip.innerHTML = bannerHtml + emptyMessage;
+  } else {
+    // Нет дежурных
+    dutyHtml += `<div style="font-size:.82rem;color:var(--text-faint);font-style:italic">Дежурных не назначено</div>`;
+    if (isAdmin) {
+      dutyHtml += `<button class="day-panel-add-btn" onclick="openModal('${key}',${dd},${mm-1},${y},'assign')">+ Назначить дежурного</button>`;
+    }
   }
+
+  dutyStrip.innerHTML = dutyHtml;
   const pairsEl = panel.querySelector('.day-panel-pairs');
   pairsEl.innerHTML = PAIRS.map(p => {
     const entries = getPairEntries(key, p.n);
@@ -904,7 +878,8 @@ function addPairEntry(key, pairN) {
   const deptSel = document.getElementById(`pair-dept-${key}-${pairN}`);
   const tid = tSel?.value;
   if (!tid) { showToast('Выберите преподавателя', 'error'); return; }
-  // Проверка: не занят ли преподаватель в этот же день в другом корпусе
+
+  // Проверка конфликта в другой паре этого же дня
   for (const [otherKey, lessons] of Object.entries(State.lessons)) {
     if (otherKey !== key) continue;
     for (const [pn, arr] of Object.entries(lessons)) {
@@ -916,25 +891,28 @@ function addPairEntry(key, pairN) {
       }
     }
   }
+
   const t = teacherById(tid);
   const depts = Array.isArray(t?.depts) && t.depts.length ? t.depts : [t?.dept].filter(Boolean);
   const dept = (deptSel && deptSel.closest('[style*="block"]')) ? deptSel.value : (depts[0] || '');
   const room = (roomEl?.value || '').trim();
-  // Правильно инициализируем State.lessons[key] и State.lessons[key][pairN]
+
+  // Пушим напрямую в State.lessons (не в отфильтрованную копию!)
   if (!State.lessons[key]) State.lessons[key] = {};
   if (!State.lessons[key][pairN]) State.lessons[key][pairN] = [];
   State.lessons[key][pairN].push({ tid, dept, room, building: State.activeBuilding });
   State.save();
-  renderDayPanel(key);
-  showToast('Преподаватель добавлен в пару', 'success');
+  renderDayPanel(key);   // перерисовываем UI сразу
+  // Асинхронно сохраняем в БД, но не ждём (fire-and-forget)
   if (sb) saveLessonsBatch(key, State.lessons[key] || {});
+  showToast('Преподаватель добавлен в пару', 'success');
 }
 function removePairEntry(key, pairN, idx) {
   const entries = getPairEntries(key, pairN);
   entries.splice(idx, 1);
   State.save();
   renderDayPanel(key);
-  saveLessonsBatch(key, State.lessons[key] || {});
+  if (sb) saveLessonsBatch(key, State.lessons[key] || {});
 }
 
 // ─── UNIFIED WELCOME / AUTH MODAL ────────────────────────────────────────────
@@ -1393,13 +1371,10 @@ function saveTeacherModal() {
       Object.assign(t, { name, dept, depts, phone, maxLoad, building });
       State.blackoutDates[editId] = [...(_modalBlackouts || [])];
       t.blackoutDates = State.blackoutDates[editId];
+      // ★ Добавить обновление в Supabase
+      if (sb) saveTeachers(t);
     }
     showToast('Данные обновлены', 'success');
-  } else {
-    const newId = 't_' + Date.now();
-    State.teachers.push({ id: newId, name, dept, depts, phone, maxLoad, building, blackoutDates: [...(_modalBlackouts || [])] });
-    State.blackoutDates[newId] = [...(_modalBlackouts || [])];
-    showToast(`${name} добавлен(а)`, 'success');
   }
   _modalBlackouts = [];
   _modalDepts = [];
@@ -1468,7 +1443,9 @@ function addTeacher() {
   const newTeacher = { id: newId, name, dept: depts[0], depts, phone, maxLoad, building, blackoutDates: [] };
   State.teachers.push(newTeacher);
   State.save();
-  if (sb) saveTeachers(newTeacher);   // ★ добавить
+  // ★ Добавить сохранение в Supabase
+  if (sb) saveTeachers(newTeacher);
+  
   document.getElementById('teacherName').value = '';
   if (document.getElementById('teacherPhone')) document.getElementById('teacherPhone').value = '';
   if (document.getElementById('teacherLoad')) document.getElementById('teacherLoad').value = '2';
@@ -1712,16 +1689,26 @@ function addBlackoutDate() {
 }
 // ─── AUTO-DISTRIBUTION (с поддержкой шаблонов, без затирания других корпусов) ──
 async function applyTemplate(templateId) {
-  if (!sb) { showToast('Supabase не подключён', 'error'); return; }
+  if (!sb) {
+    showToast('Supabase не подключён', 'error');
+    return;
+  }
   const { data, error } = await sb.from('templates').select('*').eq('id', templateId).single();
-  if (error || !data) { showToast('Шаблон не найден', 'error'); return; }
-  if (data.building !== State.activeBuilding) { showToast('Шаблон другого корпуса', 'error'); return; }
-  const dutiesObj = data.duties_json;
-  const lessonsObj = data.lessons_json;
+  if (error || !data) {
+    showToast('Шаблон не найден', 'error');
+    return;
+  }
+  if (data.building !== State.activeBuilding) {
+    showToast('Шаблон другого корпуса', 'error');
+    return;
+  }
+  const dutiesObj = data.duties_json || {};
+  const lessonsObj = data.lessons_json || {};
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
-  // Удаляем только записи текущего корпуса (не трогаем другие корпуса)
+
+  // Удаляем старые дежурства и пары ТОЛЬКО для текущего корпуса и ТОЛЬКО за текущий месяц
   for (const [key, val] of Object.entries(State.duties)) {
     if (key.startsWith(prefix)) {
       State.duties[key] = val.filter(e => e.building !== State.activeBuilding);
@@ -1737,34 +1724,49 @@ async function applyTemplate(templateId) {
       if (Object.keys(State.lessons[key]).length === 0) delete State.lessons[key];
     }
   }
-  // Загружаем из шаблона (с указанием building = текущий корпус)
+
+  // Загружаем из шаблона
   for (const [dayKey, dutyList] of Object.entries(dutiesObj)) {
     if (dayKey.startsWith(prefix)) {
-      State.duties[dayKey] = dutyList.map(d => ({ tid: d.tid, dept: d.dept || null, building: State.activeBuilding }));
+      State.duties[dayKey] = dutyList.map(d => ({
+        tid: d.tid,
+        dept: d.dept || null,
+        building: State.activeBuilding
+      }));
     }
   }
   for (const [dayKey, pairData] of Object.entries(lessonsObj)) {
     if (dayKey.startsWith(prefix)) {
       if (!State.lessons[dayKey]) State.lessons[dayKey] = {};
       for (const [pn, arr] of Object.entries(pairData)) {
-        State.lessons[dayKey][pn] = arr.map(e => ({ tid: e.tid, dept: e.dept || '', room: e.room || '', building: State.activeBuilding }));
+        State.lessons[dayKey][pn] = arr.map(e => ({
+          tid: e.tid,
+          dept: e.dept || '',
+          room: e.room || '',
+          building: State.activeBuilding
+        }));
       }
     }
   }
+
   State.save();
-  renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
+  // Применяем в UI
+  renderCalendar();
+  renderAccordion();
+  renderTeachersList();
+  renderStats();
+  renderMyCabinet();
   showToast(`Шаблон «${data.name}» загружен`, 'success');
 }
 async function autoDistribute(useActiveTemplate = true) {
-  if (State.teachers.length === 0) {
-    showToast('Добавьте хотя бы одного преподавателя', 'error');
-    return;
-  }
-  if (useActiveTemplate && State.activeTemplateId) {
-    await applyTemplate(State.activeTemplateId);
-    return;
-  }
+  if (State.teachers.length === 0) { showToast('Добавьте хотя бы одного преподавателя', 'error'); return; }
+  if (useActiveTemplate && State.activeTemplateId) { await applyTemplate(State.activeTemplateId); return; }
 
+  // ── Подавляем Realtime и индивидуальные сохранения во время массовой операции ──
+  _suppressRealtimeRender = true;
+  _batchMode = true;
+
+  try {
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const total = new Date(y, m + 1, 0).getDate();
@@ -1775,15 +1777,10 @@ async function autoDistribute(useActiveTemplate = true) {
     const dow = new Date(y, m, d).getDay();
     if (dow !== 0 && !getHolidayName(key)) workdays.push(key);
   }
-
-  // 1. Очищаем локальный state для текущего корпуса (только рабочие дни)
+  // Удаляем только дежурства и пары текущего корпуса (не трогаем другие корпуса)
   for (const wd of workdays) {
-    const v = State.duties[wd];
-    if (v) {
-      const allEntries = (Array.isArray(v) ? v : [v]).map(normEntry);
-      const kept = allEntries.filter(e => e.building !== State.activeBuilding);
-      if (kept.length) State.duties[wd] = kept; else delete State.duties[wd];
-    }
+    const dutyEntries = getDutyEntries(wd);
+    for (const e of dutyEntries) removeDuty(wd, e.tid, e.dept);
     if (State.lessons[wd]) {
       for (let pn = 1; pn <= 6; pn++) {
         if (State.lessons[wd][pn]) {
@@ -1794,24 +1791,10 @@ async function autoDistribute(useActiveTemplate = true) {
       if (Object.keys(State.lessons[wd]).length === 0) delete State.lessons[wd];
     }
   }
-
-  // 2. Подготовка
-  const weekCounts = {};
-  const monthCounts = {};
-  const pairCounts = {};
-  State.teachers.forEach(t => {
-    weekCounts[t.id] = {};
-    monthCounts[t.id] = 0;
-    pairCounts[t.id] = 0;
-  });
-
+  const weekCounts = {}; const monthCounts = {}; const pairCounts = {};
+  State.teachers.forEach(t => { weekCounts[t.id] = {}; monthCounts[t.id] = 0; pairCounts[t.id] = 0; });
   const buildingTeachers = State.teachers.filter(t => (t.building || '1') === State.activeBuilding);
-  if (buildingTeachers.length === 0) {
-    showToast(`Нет преподавателей в ${State.activeBuilding} корпусе`, 'error');
-    return;
-  }
-
-  // 3. Распределяем пары и дежурных
+  if (buildingTeachers.length === 0) { showToast(`Нет преподавателей в ${State.activeBuilding} корпусе`, 'error'); return; }
   for (const key of workdays) {
     const weekKeys = getWeekKeys(key);
     const weekId = weekKeys[0];
@@ -1819,16 +1802,13 @@ async function autoDistribute(useActiveTemplate = true) {
       const bl = [...(t.blackoutDates || []), ...(State.blackoutDates[t.id] || [])];
       return bl.includes(key);
     };
-
     if (!State.lessons[key]) State.lessons[key] = {};
     for (let pn = 1; pn <= 6; pn++) State.lessons[key][pn] = [];
-
-    let shuffled = [...buildingTeachers].filter(t => !blackoutCheck(t));
+    const shuffled = [...buildingTeachers].filter(t => !blackoutCheck(t));
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
-
     const maxTeachersPerPair = Math.max(2, Math.ceil(shuffled.length / 6));
     let tIdx = 0;
     for (let pi = 0; pi < 6 && tIdx < shuffled.length; pi++) {
@@ -1837,10 +1817,7 @@ async function autoDistribute(useActiveTemplate = true) {
       const pairsLeft = 6 - pi;
       let minSlot = Math.max(1, Math.floor(remaining / pairsLeft / 1.5));
       let maxSlot = Math.min(maxTeachersPerPair, Math.ceil(remaining / pairsLeft * 1.8));
-      if (pairN === 6) {
-        minSlot = 0;
-        maxSlot = Math.min(1, remaining);
-      }
+      if (pairN === 6) { minSlot = 0; maxSlot = Math.min(1, remaining); }
       if (pairN === 5) maxSlot = Math.min(maxSlot, Math.ceil(maxTeachersPerPair * 0.6));
       const slotSize = minSlot + Math.floor(Math.random() * (maxSlot - minSlot + 1));
       for (let s = 0; s < slotSize && tIdx < shuffled.length; s++, tIdx++) {
@@ -1851,7 +1828,6 @@ async function autoDistribute(useActiveTemplate = true) {
         pairCounts[t.id]++;
       }
     }
-
     const pair1 = State.lessons[key][1] || [];
     const pair2 = State.lessons[key][2] || [];
     const dutyPool = [...pair1, ...pair2];
@@ -1866,84 +1842,70 @@ async function autoDistribute(useActiveTemplate = true) {
       break;
     }
     if (!dutyTeacher) {
-      dutyTeacher = buildingTeachers
-        .filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
+      dutyTeacher = buildingTeachers.filter(t => !blackoutCheck(t) && monthCounts[t.id] < 2)
         .sort((a, b) => monthCounts[a.id] - monthCounts[b.id])[0] || buildingTeachers[0];
     }
     if (dutyTeacher) {
       const dept = Array.isArray(dutyTeacher.depts) && dutyTeacher.depts.length ? dutyTeacher.depts[0] : (dutyTeacher.dept || '');
-      // Добавляем только в локальный state — Supabase пишем батчем ниже
-      const v = State.duties[key];
-      const allEntries = v ? (Array.isArray(v) ? v : [v]).map(normEntry) : [];
-      allEntries.push({ tid: dutyTeacher.id, dept, building: State.activeBuilding });
-      State.duties[key] = allEntries;
+      addDuty(key, dutyTeacher.id, dept, State.activeBuilding);
       weekCounts[dutyTeacher.id][weekId] = (weekCounts[dutyTeacher.id][weekId] || 0) + 1;
       monthCounts[dutyTeacher.id]++;
     }
   }
-
   State.save();
-  renderCalendar();
-  renderAccordion();
-  renderTeachersList();
-  renderStats();
-  renderMyCabinet();
+    // ─── СОХРАНЕНИЕ В SUPABASE ─────────────────────────────────────────
+  await deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
+  await deleteLessonsMonthForBuilding(y, m, State.activeBuilding);
 
-  // ─── СОХРАНЕНИЕ В SUPABASE С ПОДАВЛЕНИЕМ REALTIME ───
-  _suppressRealtimeRender = true;
-  try {
-    await deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
-    await deleteLessonsMonthForBuilding(y, m, State.activeBuilding);
+  const scheduleRows = [];
+  for (const [key, val] of Object.entries(State.duties)) {
+    if (!key.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)) continue;
+    for (const e of val) {
+      if (e.building === State.activeBuilding) {
+        scheduleRows.push({
+          date_key: key,
+          teacher_id: e.tid,
+          dept: e.dept || '',
+          replace_request: State.replaceRequests[key] || false,
+          building: e.building
+        });
+      }
+    }
+  }
+  if (scheduleRows.length) await saveScheduleBatch(scheduleRows);
 
-    const scheduleRows = [];
-    for (const [key, val] of Object.entries(State.duties)) {
-      if (!key.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)) continue;
-      for (const e of val) {
+  const lessonRows = [];
+  for (const [key, lessons] of Object.entries(State.lessons)) {
+    if (!key.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)) continue;
+    for (const [pn, arr] of Object.entries(lessons)) {
+      for (const e of arr) {
         if (e.building === State.activeBuilding) {
-          scheduleRows.push({
+          lessonRows.push({
             date_key: key,
+            pair_num: pn,
             teacher_id: e.tid,
             dept: e.dept || '',
-            replace_request: State.replaceRequests[key] || false,
+            room: e.room || '',
             building: e.building
           });
         }
       }
     }
-    if (scheduleRows.length) await saveScheduleBatch(scheduleRows);
+  }
+  if (lessonRows.length) {
+    const chunkSize = 500;
+    for (let i = 0; i < lessonRows.length; i += chunkSize) {
+      await sb.from('lessons').insert(lessonRows.slice(i, i + chunkSize));
+    }
+  }
+  showToast(`Распределение для ${State.activeBuilding} корпуса сохранено в облако`, 'success');
 
-    const lessonRows = [];
-    for (const [key, lessons] of Object.entries(State.lessons)) {
-      if (!key.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)) continue;
-      for (const [pn, arr] of Object.entries(lessons)) {
-        for (const e of arr) {
-          if (e.building === State.activeBuilding) {
-            lessonRows.push({
-              date_key: key,
-              pair_num: pn,
-              teacher_id: e.tid,
-              dept: e.dept || '',
-              room: e.room || '',
-              building: e.building
-            });
-          }
-        }
-      }
-    }
-    if (lessonRows.length) {
-      const chunkSize = 500;
-      for (let i = 0; i < lessonRows.length; i += chunkSize) {
-        await sb.from('lessons').insert(lessonRows.slice(i, i + chunkSize));
-      }
-    }
-    showToast(`Распределение для ${State.activeBuilding} корпуса сохранено в облако`, 'success');
   } finally {
-    await new Promise(r => setTimeout(r, 2500));
+    _batchMode = false;
+    // Ждём ~2 сек, чтобы все уже летящие Realtime-события прилетели и были отброшены
+    await new Promise(r => setTimeout(r, 2000));
     _suppressRealtimeRender = false;
-    // Прогрессивное мигание — ячейки вспыхивают по очереди
-    workdays.forEach((day, i) => {
-      setTimeout(() => flashCell(day), 80 + i * 60);
-    });
+    renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
   }
 }
 function clearAll() {
@@ -1954,6 +1916,11 @@ function clearAll() {
   Object.keys(State.duties).forEach(k => { if (k.startsWith(prefix)) delete State.duties[k]; });
   Object.keys(State.replaceRequests).forEach(k => { if (k.startsWith(prefix)) delete State.replaceRequests[k]; });
   State.save();
+  // ★ Очищаем Supabase для текущего корпуса
+  if (sb) {
+    deleteScheduleMonthForBuilding(y, m, State.activeBuilding);
+    deleteLessonsMonthForBuilding(y, m, State.activeBuilding);
+  }
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
   showToast('Расписание очищено', 'info');
 }
@@ -2005,6 +1972,7 @@ let sb = null;
 let sbChannel = null;
 let sbReady = false;
 let _suppressRealtimeRender = false;
+let _batchMode = false; // во время массовых операций — пропускаем индивидуальные сохранения в Supabase
 
 function setSbStatus(state, msg) {
   const dot = document.getElementById('sbDot');
@@ -2049,30 +2017,51 @@ async function loadSchedule() { if (!sb) return; const { data, error } = await s
 function mapTeacherRow(r) { let depts = []; if (Array.isArray(r.depts) && r.depts.length) depts = r.depts; else if (r.dept) depts = [r.dept]; return { id: r.id, name: r.name, dept: depts[0] || '', depts: depts, phone: r.phone || '', maxLoad: r.max_load || 2, blackoutDates: Array.isArray(r.blackout_dates) ? r.blackout_dates : [], building: r.building || '1' }; }
 async function saveTeachers(teacher) { if (!sb || !teacher) return; const depts = Array.isArray(teacher.depts) && teacher.depts.length ? teacher.depts : [teacher.dept].filter(Boolean); const { error } = await sb.from('teachers').upsert({ id: teacher.id, name: teacher.name, dept: depts[0] || '', depts: depts, phone: teacher.phone || '', max_load: teacher.maxLoad || 2, blackout_dates: State.blackoutDates[teacher.id] || [], building: teacher.building || '1' }, { onConflict: 'id' }); if (error) console.warn('[SB] saveTeachers error:', error.message); }
 async function deleteTeacherFromSb(id) { if (!sb) return; await sb.from('schedule').update({ teacher_id: null }).eq('teacher_id', id); await sb.from('teachers').delete().eq('id', id); }
-async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) { if (!sb) return; if (teacherId) { await sb.from('schedule').upsert({ date_key: key, teacher_id: teacherId, dept: dept || null, replace_request: replaceRequest, building: building }, { onConflict: 'date_key,teacher_id,dept' }); } else { await sb.from('schedule').delete().eq('date_key', key); } }
-async function saveScheduleRemoveOne(key, teacherId, building = State.activeBuilding) { if (!sb) return; await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building); }
+async function saveSchedule(key, teacherId, replaceRequest = false, dept = null, building = State.activeBuilding) {
+  if (!sb) return;
+  if (teacherId) {
+    // Удаляем старую запись (если была)
+    await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building);
+    // Вставляем новую, гарантируя, что dept – строка, а не null
+    await sb.from('schedule').insert({
+      date_key: key,
+      teacher_id: teacherId,
+      dept: dept || '',   // ← пустая строка вместо null
+      replace_request: replaceRequest,
+      building: building
+    });
+    console.log(`✅ Сохранено: ${key} -> ${teacherId}`);
+  } else {
+    await sb.from('schedule').delete().eq('date_key', key);
+  }
+}
+async function saveScheduleRemoveOne(key, teacherId, building) {
+  if (!sb) return;
+  await sb.from('schedule').delete().eq('date_key', key).eq('teacher_id', teacherId).eq('building', building);
+}
 async function saveScheduleBatch(rows) {
   if (!sb || !rows.length) return;
-  // rows должны содержать поле building
-  await sb.from('schedule').upsert(rows, { onConflict: 'date_key,teacher_id,dept' });
+  // Каждую строку сохраняем отдельно через delete+insert
+  for (const row of rows) {
+    await sb.from('schedule').delete()
+      .eq('date_key', row.date_key)
+      .eq('teacher_id', row.teacher_id)
+      .eq('building', row.building);
+    await sb.from('schedule').insert({
+      date_key: row.date_key,
+      teacher_id: row.teacher_id,
+      dept: row.dept || '',
+      replace_request: row.replace_request || false,
+      building: row.building
+    });
+  }
 }
 async function deleteScheduleMonthForBuilding(year, month, building) {
   if (!sb) return;
-  const total = new Date(year, month + 1, 0).getDate();
-  // Удаляем только рабочие дни — выходные и праздники не трогаем
-  const workdayKeys = [];
-  for (let d = 1; d <= total; d++) {
-    const key = dateKey(year, month, d);
-    const dow = new Date(year, month, d).getDay();
-    if (dow !== 0 && !getHolidayName(key)) workdayKeys.push(key);
-  }
-  if (!workdayKeys.length) return;
-  // Удаляем батчами по 50 ключей
-  const chunkSize = 50;
-  for (let i = 0; i < workdayKeys.length; i += chunkSize) {
-    const chunk = workdayKeys.slice(i, i + chunkSize);
-    await sb.from('schedule').delete().in('date_key', chunk).eq('building', building);
-  }
+  const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const from = `${prefix}-01`;
+  const to = `${prefix}-32`;
+  await sb.from('schedule').delete().gte('date_key', from).lte('date_key', to).eq('building', building);
 }
 async function deleteLessonsMonthForBuilding(year, month, building) {
   if (!sb) return;
@@ -2081,63 +2070,145 @@ async function deleteLessonsMonthForBuilding(year, month, building) {
   const to = `${prefix}-32`;
   await sb.from('lessons').delete().gte('date_key', from).lte('date_key', to).eq('building', building);
 }
-async function loadLessons() { if (!sb) return; const y = State.currentDate.getFullYear(); const m = State.currentDate.getMonth(); const prefix = `${y}-${String(m+1).padStart(2,'0')}`; const { data, error } = await sb.from('lessons').select('date_key, pair_num, teacher_id, dept, room, building').like('date_key', prefix + '%'); if (error) { console.warn('[SB] loadLessons error:', error.message); return; } Object.keys(State.lessons).forEach(k => { if (k.startsWith(prefix)) delete State.lessons[k]; }); (data || []).forEach(r => { if (!State.lessons[r.date_key]) State.lessons[r.date_key] = {}; const pn = r.pair_num; if (!State.lessons[r.date_key][pn]) State.lessons[r.date_key][pn] = []; State.lessons[r.date_key][pn].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); }
-async function saveLessonsBatch(key, lessons) { if (!sb) return; await sb.from('lessons').delete().eq('date_key', key); const rows = []; [1,2,3,4,5,6].forEach(pn => { (lessons[pn] || []).forEach(e => { rows.push({ date_key: key, pair_num: pn, teacher_id: e.tid, dept: e.dept || '', room: e.room || '', building: e.building || State.activeBuilding }); }); }); if (rows.length) await sb.from('lessons').insert(rows); }
+async function loadLessons() {
+  if (!sb) return;
+  const y = State.currentDate.getFullYear();
+  const m = State.currentDate.getMonth();
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+  const { data, error } = await sb.from('lessons')
+    .select('date_key, pair_num, teacher_id, dept, room, building')
+    .like('date_key', prefix + '%');
+  if (error) {
+    console.warn('[SB] loadLessons error:', error.message);
+    return;
+  }
+  // Очищаем старые пары ТОЛЬКО для текущего месяца (все корпуса)
+  Object.keys(State.lessons).forEach(k => {
+    if (k.startsWith(prefix)) delete State.lessons[k];
+  });
+  // Заполняем новыми
+  (data || []).forEach(r => {
+    if (!State.lessons[r.date_key]) State.lessons[r.date_key] = {};
+    const pn = r.pair_num;
+    if (!State.lessons[r.date_key][pn]) State.lessons[r.date_key][pn] = [];
+    State.lessons[r.date_key][pn].push({
+      tid: r.teacher_id,
+      dept: r.dept || '',
+      room: r.room || '',
+      building: r.building || '1'
+    });
+  });
+  // Не вызываем renderCalendar здесь, это делает внешний код
+}
+async function saveLessonsBatch(key, lessons) {
+  if (!sb) return;
+  // Удаляем все старые записи для этого дня и корпуса
+  await sb.from('lessons').delete().eq('date_key', key).eq('building', State.activeBuilding);
+  const rows = [];
+  for (let pn = 1; pn <= 6; pn++) {
+    const arr = lessons[pn] || [];
+    for (const e of arr) {
+      if (e.building === State.activeBuilding) {
+        rows.push({
+          date_key: key,
+          pair_num: pn,
+          teacher_id: e.tid,
+          dept: e.dept || '',
+          room: e.room || '',
+          building: State.activeBuilding
+        });
+      }
+    }
+  }
+  if (rows.length) {
+    const { error } = await sb.from('lessons').insert(rows);
+    if (error) console.error('[SB] saveLessonsBatch error:', error);
+  }
+}
 function subscribeRealtime() { if (!sb || sbChannel) return; sbChannel = sb.channel('ag-realtime-v6').on('postgres_changes', { event: '*', schema: 'public', table: 'schedule' }, onScheduleChange).on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, onTeacherChange).on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, onLessonsChange).subscribe(status => { if (status === 'SUBSCRIBED') setSbStatus('connected', 'подключено · Realtime ⚡'); else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { setSbStatus('error', 'Realtime: ошибка канала'); setTimeout(() => { sbChannel = null; subscribeRealtime(); }, 5000); } else if (status === 'CLOSED') { sbChannel = null; setSbStatus('error', 'Realtime: канал закрыт'); } }); }
 function onLessonsChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { if (sb) { sb.from('lessons').select('pair_num, teacher_id, dept, room, building').eq('date_key', key).then(({ data }) => { State.lessons[key] = {}; (data || []).forEach(r => { if (!State.lessons[key][r.pair_num]) State.lessons[key][r.pair_num] = []; State.lessons[key][r.pair_num].push({ tid: r.teacher_id, dept: r.dept || '', room: r.room || '', building: r.building || '1' }); }); if (State.activeDayKey === key) renderDayPanel(key); }); } } else { const pn = row.pair_num; if (!State.lessons[key]) State.lessons[key] = {}; if (!State.lessons[key][pn]) State.lessons[key][pn] = []; const exists = State.lessons[key][pn].some(e => e.tid === row.teacher_id && e.room === row.room); if (!exists) State.lessons[key][pn].push({ tid: row.teacher_id, dept: row.dept || '', room: row.room || '', building: row.building || '1' }); if (State.activeDayKey === key) renderDayPanel(key); } renderCalendar(); }
-function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; const bld = oldRow?.building || '1'; if (tid) removeDuty(key, tid, null, bld); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = true; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
+function onScheduleChange({ eventType, new: row, old: oldRow }) { if (_suppressRealtimeRender) return; const key = row?.date_key ?? oldRow?.date_key; if (!key) return; if (eventType === 'DELETE') { const tid = oldRow?.teacher_id; if (tid) removeDuty(key, tid); else clearDutyDay(key); } else { if (row.teacher_id) addDuty(key, row.teacher_id, row.dept || null, row.building || '1'); const wasReplace = !!State.replaceRequests[key]; if (row.replace_request) { State.replaceRequests[key] = true; if (!wasReplace) { const teacher = teacherById(row.teacher_id); if (teacher) { const [, mm, dd] = key.split('-'); const label = `${parseInt(dd)} ${MONTHS_RU_GEN[parseInt(mm) - 1]}`; addNotification(`🔄 ${teacher.name} просит замену ${label}`, '🔄'); } } } else { delete State.replaceRequests[key]; } } State.save(); renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet(); flashCell(key); }
 function onTeacherChange({ eventType, new: row, old: oldRow }) { if (eventType === 'DELETE') { State.teachers = State.teachers.filter(t => t.id !== oldRow.id); } else { const mapped = mapTeacherRow(row); const idx = State.teachers.findIndex(t => t.id === row.id); if (idx >= 0) State.teachers[idx] = { ...State.teachers[idx], ...mapped }; else State.teachers.push(mapped); if (mapped.blackoutDates?.length) State.blackoutDates[mapped.id] = mapped.blackoutDates; } State.save(); renderTeachersList(); renderCalendar(); renderAccordion(); renderStats(); }
 function flashCell(key) { const cell = document.querySelector(`.day-cell[data-key="${key}"]`); if (!cell) return; cell.classList.remove('rt-flash'); void cell.offsetWidth; cell.classList.add('rt-flash'); setTimeout(() => cell.classList.remove('rt-flash'), 900); }
 
 // ─── TEMPLATES FUNCTIONS ────────────────────────────────────────────────────
 async function saveTemplate() {
-  if (State.currentRole !== 'admin') { showToast('Только завуч может создавать шаблоны', 'error'); return; }
+  if (State.currentRole !== 'admin') {
+    showToast('Только завуч может создавать шаблоны', 'error');
+    return;
+  }
   const templateName = document.getElementById('newTemplateName').value.trim();
   if (!templateName) {
     showToast('Введите название шаблона', 'error');
-    const input = document.getElementById('newTemplateName');
-    input.style.borderColor = 'var(--danger)';
-    setTimeout(() => input.style.borderColor = '', 1000);
     return;
   }
   const building = State.activeBuilding;
   const y = State.currentDate.getFullYear();
   const m = State.currentDate.getMonth();
   const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+
   const dutiesSnapshot = {};
   const lessonsSnapshot = {};
+
+  // Копируем дежурства ТОЛЬКО текущего корпуса
   for (const [key, val] of Object.entries(State.duties)) {
     if (!key.startsWith(prefix)) continue;
     const filtered = val.filter(e => e.building === building);
-    if (filtered.length) dutiesSnapshot[key] = filtered.map(e => ({ tid: e.tid, dept: e.dept }));
+    if (filtered.length) {
+      dutiesSnapshot[key] = filtered.map(e => ({ tid: e.tid, dept: e.dept || null }));
+    }
   }
+
+  // Копируем пары ТОЛЬКО текущего корпуса
   for (const [key, pairs] of Object.entries(State.lessons)) {
     if (!key.startsWith(prefix)) continue;
     const filteredPairs = {};
     for (const [pn, arr] of Object.entries(pairs)) {
       const filtered = arr.filter(e => e.building === building);
-      if (filtered.length) filteredPairs[pn] = filtered.map(e => ({ tid: e.tid, dept: e.dept, room: e.room }));
+      if (filtered.length) {
+        filteredPairs[pn] = filtered.map(e => ({ tid: e.tid, dept: e.dept || '', room: e.room || '' }));
+      }
     }
-    if (Object.keys(filteredPairs).length) lessonsSnapshot[key] = filteredPairs;
+    if (Object.keys(filteredPairs).length) {
+      lessonsSnapshot[key] = filteredPairs;
+    }
   }
-  if (!sb) { showToast('Supabase не доступен', 'error'); return; }
-  const { data: existing } = await sb.from('templates').select('id').eq('name', templateName).eq('building', building);
+
+  if (!sb) {
+    showToast('Supabase не доступен', 'error');
+    return;
+  }
+
+  // Проверяем, существует ли уже шаблон с таким именем и корпусом
+  const { data: existing } = await sb.from('templates')
+    .select('id')
+    .eq('name', templateName)
+    .eq('building', building);
   if (existing && existing.length) {
     showConfirmDialog(
       'Перезаписать шаблон?',
       `Шаблон с именем «${templateName}» уже существует в этом корпусе. Перезаписать?`,
       async () => {
-        await sb.from('templates').update({ duties_json: dutiesSnapshot, lessons_json: lessonsSnapshot, created_at: new Date() }).eq('id', existing[0].id);
+        await sb.from('templates')
+          .update({ duties_json: dutiesSnapshot, lessons_json: lessonsSnapshot })
+          .eq('id', existing[0].id);
         showToast(`Шаблон «${templateName}» обновлён`, 'success');
         loadTemplatesList();
         document.getElementById('newTemplateName').value = '';
       },
-      () => { showToast('Перезапись отменена', 'info'); }
+      () => showToast('Перезапись отменена', 'info')
     );
   } else {
-    const { error } = await sb.from('templates').insert({ name: templateName, building, duties_json: dutiesSnapshot, lessons_json: lessonsSnapshot });
-    if (error) showToast('Ошибка сохранения шаблона', 'error');
-    else {
+    const { error } = await sb.from('templates').insert({
+      name: templateName,
+      building: building,
+      duties_json: dutiesSnapshot,
+      lessons_json: lessonsSnapshot
+    });
+    if (error) {
+      console.error(error);
+      showToast('Ошибка сохранения шаблона', 'error');
+    } else {
       showToast(`Шаблон «${templateName}» сохранён`, 'success');
       document.getElementById('newTemplateName').value = '';
       loadTemplatesList();
@@ -2295,19 +2366,20 @@ function init() {
   document.getElementById('addBlackoutBtn').addEventListener('click', addBlackoutDate);
   const sbClose = document.getElementById('sbStatusClose'); if (sbClose) sbClose.addEventListener('click', () => { document.getElementById('sbStatusbar').classList.add('hidden'); });
   document.querySelectorAll('.building-tab').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    State.activeBuilding = btn.dataset.building;
-    _syncBuildingTabs(btn.dataset.building);
-    if (State.currentRole === 'admin') {
-      await loadSchedule();
-      await loadLessons();
-      renderCalendar();
-      renderAccordion();
-    } else {
-      renderCalendar();
-      renderAccordion();
-    }
-  });
+    btn.addEventListener('click', async () => {
+      State.activeBuilding = btn.dataset.building;
+      _syncBuildingTabs(btn.dataset.building);
+      if (State.currentRole === 'admin') {
+        await loadSchedule();
+        await loadLessons();
+        await loadTemplatesList();  
+        renderCalendar();
+        renderAccordion();
+      } else {
+        renderCalendar();
+        renderAccordion();
+      }
+    });
   });
   const dpClose = document.getElementById('dayPanelClose'); if (dpClose) dpClose.addEventListener('click', closeDayPanel);
   const dpBackdrop = document.getElementById('dayPanelBackdrop'); if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
