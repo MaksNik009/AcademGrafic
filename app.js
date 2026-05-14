@@ -50,7 +50,8 @@ const State = {
   duties: {},
   replaceRequests: {},
   blackoutDates: {},
-  notifications: [],
+  notifications: [],      // только для завуча
+  teacherNotifs: {},      // { [tid]: [ ...notifications ] }
   lessons: {},
   currentRole: 'admin',
   currentTeacherId: null,
@@ -242,12 +243,20 @@ function _syncBuildingTabs(b) {
 // ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
 function addNotification(msg, icon = '🔔', forTid = null) {
   const n = {
-    id: 'n_' + Date.now(),
-    msg, icon, forTid,
+    id: 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    msg, icon,
     time: new Date().toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' })
   };
-  State.notifications.unshift(n);
-  if (State.notifications.length > 50) State.notifications.pop();
+  if (forTid) {
+    // Уведомление конкретному преподавателю
+    if (!State.teacherNotifs[forTid]) State.teacherNotifs[forTid] = [];
+    State.teacherNotifs[forTid].unshift(n);
+    if (State.teacherNotifs[forTid].length > 30) State.teacherNotifs[forTid].pop();
+  } else {
+    // Уведомление только завучу
+    State.notifications.unshift(n);
+    if (State.notifications.length > 50) State.notifications.pop();
+  }
   State.save();
   renderNotifications();
 }
@@ -255,14 +264,19 @@ function renderNotifications() {
   const list = document.getElementById('notifList');
   const dot  = document.getElementById('notifDot');
   if (!list || !dot) return;
-  // Завуч видит все, преподаватель — только свои (forTid === его tid)
-  const myTid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
-  const visible = myTid
-    ? State.notifications.filter(n => n.forTid === myTid)
-    : State.notifications;
-  const count = visible.length;
-  dot.classList.toggle('visible', count > 0);
-  if (count === 0) {
+
+  let visible = [];
+  if (State.currentRole === 'teacher') {
+    // Преподаватель видит ТОЛЬКО свои уведомления из teacherNotifs
+    const tid = State.currentTeacherId;
+    visible = tid ? (State.teacherNotifs[tid] || []) : [];
+  } else {
+    // Завуч видит только свои (adminnotifications)
+    visible = State.notifications;
+  }
+
+  dot.classList.toggle('visible', visible.length > 0);
+  if (visible.length === 0) {
     list.innerHTML = '<div class="notif-empty">Нет новых уведомлений</div>';
     return;
   }
@@ -278,7 +292,14 @@ function renderNotifications() {
   list.querySelectorAll('.notif-dismiss').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      State.notifications = State.notifications.filter(n => n.id !== btn.dataset.id);
+      if (State.currentRole === 'teacher') {
+        const tid = State.currentTeacherId;
+        if (tid && State.teacherNotifs[tid]) {
+          State.teacherNotifs[tid] = State.teacherNotifs[tid].filter(n => n.id !== btn.dataset.id);
+        }
+      } else {
+        State.notifications = State.notifications.filter(n => n.id !== btn.dataset.id);
+      }
       State.save();
       renderNotifications();
     });
@@ -2381,10 +2402,9 @@ function init() {
   document.getElementById('notifBtn').addEventListener('click', e => { e.stopPropagation(); const panel = document.getElementById('notifPanel'); const btn = e.currentTarget; const rect = btn.getBoundingClientRect(); const isMob = window.innerWidth <= 760; if (isMob) { const pw = Math.min(300, window.innerWidth - 16); panel.style.width = pw + 'px'; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = 'auto'; panel.style.left = '8px'; } else { panel.style.width = ''; panel.style.left = ''; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = (window.innerWidth - rect.right) + 'px'; } panel.classList.toggle('open'); });
   document.addEventListener('click', e => { if (!e.target.closest('.notif-wrap')) document.getElementById('notifPanel').classList.remove('open'); });
   document.getElementById('notifClearAll').addEventListener('click', () => {
-    const myTid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
-    if (myTid) {
-      // Удаляем только свои уведомления, чужие не трогаем
-      State.notifications = State.notifications.filter(n => n.forTid !== myTid);
+    if (State.currentRole === 'teacher') {
+      const tid = State.currentTeacherId;
+      if (tid) State.teacherNotifs[tid] = [];
     } else {
       State.notifications = [];
     }
