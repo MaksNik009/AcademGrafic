@@ -255,11 +255,11 @@ function renderNotifications() {
   const list = document.getElementById('notifList');
   const dot  = document.getElementById('notifDot');
   if (!list || !dot) return;
-  // Фильтрация: завуч видит все, преподаватель — только свои (forTid === null || forTid === его tid)
-  const tid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
-  const visible = State.notifications.filter(n =>
-    tid === null ? true : (n.forTid === null || n.forTid === undefined || n.forTid === tid)
-  );
+  // Завуч видит все, преподаватель — только свои (forTid === его tid)
+  const myTid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
+  const visible = myTid
+    ? State.notifications.filter(n => n.forTid === myTid)
+    : State.notifications;
   const count = visible.length;
   dot.classList.toggle('visible', count > 0);
   if (count === 0) {
@@ -2381,11 +2381,12 @@ function init() {
   document.getElementById('notifBtn').addEventListener('click', e => { e.stopPropagation(); const panel = document.getElementById('notifPanel'); const btn = e.currentTarget; const rect = btn.getBoundingClientRect(); const isMob = window.innerWidth <= 760; if (isMob) { const pw = Math.min(300, window.innerWidth - 16); panel.style.width = pw + 'px'; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = 'auto'; panel.style.left = '8px'; } else { panel.style.width = ''; panel.style.left = ''; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = (window.innerWidth - rect.right) + 'px'; } panel.classList.toggle('open'); });
   document.addEventListener('click', e => { if (!e.target.closest('.notif-wrap')) document.getElementById('notifPanel').classList.remove('open'); });
   document.getElementById('notifClearAll').addEventListener('click', () => {
-    const tid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
-    if (tid === null) {
-      State.notifications = [];
+    const myTid = State.currentRole === 'teacher' ? State.currentTeacherId : null;
+    if (myTid) {
+      // Удаляем только свои уведомления, чужие не трогаем
+      State.notifications = State.notifications.filter(n => n.forTid !== myTid);
     } else {
-      State.notifications = State.notifications.filter(n => n.forTid !== null && n.forTid !== undefined && n.forTid !== tid);
+      State.notifications = [];
     }
     State.save(); renderNotifications();
   });
