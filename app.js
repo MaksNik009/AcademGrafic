@@ -219,6 +219,7 @@ function applyRole(role) {
     State.activeBuilding = '1';
     _syncBuildingTabs('1');
     if (typeof loadTemplatesList === 'function') loadTemplatesList();
+    loadNotifications(); // загружаем уведомления завуча
   }
   if (role === 'teacher') {
     if (!State.currentTeacherId && State.teachers.length > 0) {
@@ -230,6 +231,7 @@ function applyRole(role) {
     if (typeof closeDayPanel === 'function') closeDayPanel();
     switchTab('calendar');
     renderMyCabinet();
+    loadNotifications(); // загружаем уведомления для конкретного преподавателя
   }
   renderCalendar();
   renderAccordion();
@@ -241,23 +243,48 @@ function _syncBuildingTabs(b) {
 }
 
 // ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
-function addNotification(msg, icon = '🔔', forTid = null) {
+// recipient = teacher_id для преподавателя, 'admin' для завуча
+async function addNotification(msg, icon = '🔔', forTid = null) {
+  const recipient = forTid || 'admin';
   const n = {
     id: 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
     msg, icon,
     time: new Date().toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' })
   };
+  // Сохраняем в Supabase (персонально)
+  if (sb) {
+    await sb.from('notifications').insert({ id: n.id, recipient, msg: n.msg, icon: n.icon, time: n.time })
+      .then(({ error }) => { if (error) console.warn('[SB] addNotification error:', error.message); });
+  }
+  // Обновляем локальный State для мгновенного отображения
   if (forTid) {
-    // Уведомление конкретному преподавателю
     if (!State.teacherNotifs[forTid]) State.teacherNotifs[forTid] = [];
     State.teacherNotifs[forTid].unshift(n);
     if (State.teacherNotifs[forTid].length > 30) State.teacherNotifs[forTid].pop();
   } else {
-    // Уведомление только завучу
     State.notifications.unshift(n);
     if (State.notifications.length > 50) State.notifications.pop();
   }
-  State.save();
+  renderNotifications();
+}
+
+// Загрузка уведомлений из Supabase для текущего пользователя
+async function loadNotifications() {
+  if (!sb) return;
+  const recipient = State.currentRole === 'teacher' ? State.currentTeacherId : 'admin';
+  if (!recipient) return;
+  const { data, error } = await sb.from('notifications')
+    .select('id, recipient, msg, icon, time')
+    .eq('recipient', recipient)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) { console.warn('[SB] loadNotifications error:', error.message); return; }
+  const notifs = (data || []).map(r => ({ id: r.id, msg: r.msg, icon: r.icon, time: r.time }));
+  if (State.currentRole === 'teacher' && State.currentTeacherId) {
+    State.teacherNotifs[State.currentTeacherId] = notifs;
+  } else {
+    State.notifications = notifs;
+  }
   renderNotifications();
 }
 function renderNotifications() {
@@ -290,17 +317,24 @@ function renderNotifications() {
       <button class="notif-dismiss" data-id="${n.id}" aria-label="Закрыть">✕</button>
     </div>`).join('');
   list.querySelectorAll('.notif-dismiss').forEach(btn => {
-    btn.addEventListener('click', e => {
+    btn.addEventListener('click', async e => {
       e.stopPropagation();
+      const nid = btn.dataset.id;
+      // Удаляем только свою запись из Supabase (по id + recipient — другие не затрагиваются)
+      if (sb) {
+        const recipient = State.currentRole === 'teacher' ? State.currentTeacherId : 'admin';
+        await sb.from('notifications').delete().eq('id', nid).eq('recipient', recipient)
+          .then(({ error }) => { if (error) console.warn('[SB] dismiss notif error:', error.message); });
+      }
+      // Обновляем локальный State
       if (State.currentRole === 'teacher') {
         const tid = State.currentTeacherId;
         if (tid && State.teacherNotifs[tid]) {
-          State.teacherNotifs[tid] = State.teacherNotifs[tid].filter(n => n.id !== btn.dataset.id);
+          State.teacherNotifs[tid] = State.teacherNotifs[tid].filter(n => n.id !== nid);
         }
       } else {
-        State.notifications = State.notifications.filter(n => n.id !== btn.dataset.id);
+        State.notifications = State.notifications.filter(n => n.id !== nid);
       }
-      State.save();
       renderNotifications();
     });
   });
@@ -2142,7 +2176,7 @@ async function initSupabase() {
     });
     const { error: pingErr } = await sb.from('teachers').select('id').limit(1);
     if (pingErr) throw new Error(pingErr.message.includes('fetch') ? '⚠️ Нет доступа к серверу — проверьте интернет или VPN' : `Ошибка БД: ${pingErr.message}`);
-    await loadTeachers(); await loadSchedule(); await loadLessons();
+    await loadTeachers(); await loadSchedule(); await loadLessons(); await loadNotifications();
     subscribeRealtime();
     setSbStatus('connected', 'подключено ✓');
     sbReady = true;
@@ -2401,14 +2435,19 @@ function init() {
   window.addEventListener('resize', () => { if (window.innerWidth <= 760) document.getElementById('mobileNav').classList.add('open'); });
   document.getElementById('notifBtn').addEventListener('click', e => { e.stopPropagation(); const panel = document.getElementById('notifPanel'); const btn = e.currentTarget; const rect = btn.getBoundingClientRect(); const isMob = window.innerWidth <= 760; if (isMob) { const pw = Math.min(300, window.innerWidth - 16); panel.style.width = pw + 'px'; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = 'auto'; panel.style.left = '8px'; } else { panel.style.width = ''; panel.style.left = ''; panel.style.top = (rect.bottom + 8) + 'px'; panel.style.right = (window.innerWidth - rect.right) + 'px'; } panel.classList.toggle('open'); });
   document.addEventListener('click', e => { if (!e.target.closest('.notif-wrap')) document.getElementById('notifPanel').classList.remove('open'); });
-  document.getElementById('notifClearAll').addEventListener('click', () => {
+  document.getElementById('notifClearAll').addEventListener('click', async () => {
+    const recipient = State.currentRole === 'teacher' ? State.currentTeacherId : 'admin';
+    if (sb && recipient) {
+      await sb.from('notifications').delete().eq('recipient', recipient)
+        .then(({ error }) => { if (error) console.warn('[SB] clearAll notif error:', error.message); });
+    }
     if (State.currentRole === 'teacher') {
       const tid = State.currentTeacherId;
       if (tid) State.teacherNotifs[tid] = [];
     } else {
       State.notifications = [];
     }
-    State.save(); renderNotifications();
+    renderNotifications();
   });
     const statsSearchInput = document.getElementById('statsSearchInput');
   if (statsSearchInput) {
