@@ -720,6 +720,8 @@ body[data-role="admin"]   .teacher-only{ display: none !important; }
 .notif-dismiss:hover { color:var(--danger); }
 
 /* ── HOLIDAY / REPLACE / BLACKOUT cell states ── */
+/* Admin: ячейка с нежелательным днём */
+.day-cell--admin-blackout { background:rgba(192,57,43,.09) !important; border-color:rgba(192,57,43,.50) !important; }
 .day-cell--holiday { background: var(--holiday-bg) !important; cursor: default; }
 .day-cell--holiday .day-num { color: var(--holiday-text); font-weight: 600; }
 .day-cell--replace-req { border-left: 3px solid var(--orange) !important; }
@@ -2068,3 +2070,23 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
     width: 100%;
   }
 }
+/* Кнопка «Отклонить н/д» внутри chip ячейки календаря */
+.cell-blackout-decline {
+  font-size: .58rem;
+  padding: 1px 6px;
+  background: #922b21;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 4px;
+  line-height: 1.6;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.cell-blackout-decline:hover { background: #c0392b; }
+
+/* Рабочие дни в личном кабинете преподавателя */
+.my-workday-row { border-color: rgba(46,160,100,0.35) !important; background: rgba(46,160,100,0.05) !important; }
+.my-workday-row:hover { border-color: rgba(46,160,100,0.6) !important; }
