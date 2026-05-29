@@ -2068,3 +2068,67 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
     width: 100%;
   }
 }
+
+/* ═══════════════════════════════════════════════
+   CABINET: сворачиваемые карточки
+   ═══════════════════════════════════════════════ */
+.cabinet-collapsible { padding: 0 !important; overflow: hidden; }
+
+.cabinet-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: .9rem 1.1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  gap: .5rem;
+  font-size: 1rem;
+}
+.cabinet-toggle:hover { background: var(--surface-hover, rgba(0,0,0,.03)); }
+
+.cabinet-toggle-title {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--navy, #1e293b);
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  flex: 1;
+  text-align: left;
+}
+
+.cabinet-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform .2s ease;
+}
+
+.cabinet-body { /* открыто по умолчанию */ }
+
+/* Workday кнопка замены */
+.workday-replace-btn {
+  border-color: rgba(46,160,100,0.5) !important;
+  color: var(--green, #27ae60) !important;
+}
+.workday-replace-btn:hover {
+  background: rgba(46,160,100,0.1) !important;
+  border-color: var(--green, #27ae60) !important;
+}
+.workday-replace-btn.cancel {
+  border-color: var(--orange, #f5a623) !important;
+  color: var(--orange, #f5a623) !important;
+}
+
+/* Зелёный статус рабочего дня */
+.workday-status { color: var(--green, #27ae60) !important; font-weight: 600; }
+.workday-status.replace { color: var(--orange, #f5a623) !important; }
+.workday-status.declined { color: #c0392b !important; }
+
+/* Рабочие дни строка */
+.my-workday-row {
+  border-color: rgba(46,160,100,0.35) !important;
+  background: rgba(46,160,100,0.05) !important;
+}
+.my-workday-row:hover { border-color: rgba(46,160,100,0.6) !important; }

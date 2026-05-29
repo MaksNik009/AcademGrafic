@@ -1819,6 +1819,43 @@ function renderMyCabinet() {
     }).join('');
     listEl.querySelectorAll('[data-key]').forEach(btn => { btn.addEventListener('click', () => toggleReplaceRequest(btn.dataset.key)); });
   }
+  // ── РАБОЧИЕ ДНИ ──
+  const workDaysEl = document.getElementById('myWorkDaysList');
+  if (workDaysEl && tid) {
+    const tTeacher = teacherById(tid);
+    const tBuilding = tTeacher?.building || '1';
+    const myWorkDays = [];
+    Object.keys(State.lessons).forEach(wKey => {
+      if (!wKey.startsWith(prefix)) return;
+      const lessons = State.lessons[wKey];
+      for (let pn = 1; pn <= 6; pn++) {
+        if ((lessons[pn] || []).some(e => e.tid === tid && e.building === tBuilding)) {
+          myWorkDays.push(wKey); return;
+        }
+      }
+    });
+    myWorkDays.sort();
+    if (myWorkDays.length === 0) {
+      workDaysEl.innerHTML = `<div class="empty-state" style="padding:1.5rem"><div class="empty-icon">📗</div><p class="empty-title">Нет рабочих дней</p></div>`;
+    } else {
+      workDaysEl.innerHTML = myWorkDays.map(wKey => {
+        const d = new Date(wKey + 'T00:00:00');
+        const dayStr = `${d.getDate()} ${MONTHS_RU_GEN[d.getMonth()]}`;
+        const isReq = State.replaceRequests[wKey]?.tid === tid;
+        const isDeclined = !isReq && !!(State.declinedRequests?.[wKey]);
+        return `<div class="my-duty-row my-workday-row">
+          <div class="my-duty-date">${dayStr}, ${DAYS_SHORT[d.getDay()]}</div>
+          <div class="my-duty-status workday-status${isReq ? ' replace' : isDeclined ? ' declined' : ''}">${isReq ? '🔄 Запрошена замена' : isDeclined ? '❌ Замена отклонена' : '📗 Рабочий день'}</div>
+          <button class="my-duty-action workday-replace-btn${isReq ? ' cancel' : ''}" data-wkey="${wKey}">
+            ${isReq ? 'Отменить' : '🔄 Запросить замену'}
+          </button>
+        </div>`;
+      }).join('');
+      workDaysEl.querySelectorAll('[data-wkey]').forEach(btn => {
+        btn.addEventListener('click', () => toggleReplaceRequest(btn.dataset.wkey, true));
+      });
+    }
+  }
   const myBlackouts = (State.blackoutDates[tid] || []).sort();
   if (myBlackouts.length === 0) {
     blEl.innerHTML = `<div style="font-family:var(--font-mono);font-size:.78rem;color:var(--text-faint);padding:.5rem 0">Нет нежелательных дат</div>`;
@@ -2478,6 +2515,33 @@ function init() {
   const dpClose = document.getElementById('dayPanelClose'); if (dpClose) dpClose.addEventListener('click', closeDayPanel);
   const dpBackdrop = document.getElementById('dayPanelBackdrop'); if (dpBackdrop) dpBackdrop.addEventListener('click', closeDayPanel);
   const wOverlay = document.getElementById('welcomeModalOverlay'); if (wOverlay) wOverlay.addEventListener('click', e => e.stopPropagation());
+  // ── Сворачивание cabinet-карточек ──
+  document.querySelectorAll('.cabinet-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.dataset.target;
+      const body = document.getElementById(targetId);
+      if (!body) return;
+      const expanded = btn.getAttribute('aria-expanded') !== 'false';
+      if (expanded) {
+        body.style.maxHeight = body.scrollHeight + 'px';
+        requestAnimationFrame(() => {
+          body.style.transition = 'max-height .25s ease, opacity .2s ease';
+          body.style.maxHeight = '0';
+          body.style.opacity = '0';
+          body.style.overflow = 'hidden';
+        });
+        btn.setAttribute('aria-expanded', 'false');
+        btn.querySelector('.cabinet-chevron').style.transform = 'rotate(-90deg)';
+      } else {
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.style.opacity = '1';
+        body.style.overflow = '';
+        btn.setAttribute('aria-expanded', 'true');
+        btn.querySelector('.cabinet-chevron').style.transform = '';
+        body.addEventListener('transitionend', () => { body.style.maxHeight = ''; }, { once: true });
+      }
+    });
+  });
   initSupabase();
   const seedBtn = document.getElementById('seedDemoBtn'); if (seedBtn) seedBtn.addEventListener('click', seedDemoData);
   window.seedDemoData = seedDemoData;
