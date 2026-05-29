@@ -515,34 +515,53 @@ function renderCalendar() {
 
     // ── РЕЖИМ АДМИНИСТРАТОРА
     if (State.currentRole === 'admin') {
-      // Подсветка ячейки если дежурный имеет blackout на этот день И в активном корпусе
-      const adminBlackoutEntry = dutyEntries.find(e =>
-        (State.blackoutDates[e.tid] || []).includes(key) &&
-        (teacherById(e.tid)?.building || '1') === State.activeBuilding
-      );
-      if (adminBlackoutEntry) cell.classList.add('day-cell--admin-blackout');
-
       if (dutyEntries.length > 0) {
         const first = dutyEntries[0];
         const t = teacherById(first.tid);
         if (t) {
           const color = getColor(teacherIndex(first.tid));
-          const chip = document.createElement('div'); chip.className='cell-duty-chip';
+
+          // Проверяем replace-request и blackout для ячейки
+          const cellIsReplace = !!(State.replaceRequests[key]?.building === State.activeBuilding);
+          const cellIsBlackout = (State.blackoutDates[first.tid] || []).includes(key) &&
+            (teacherById(first.tid)?.building || '1') === State.activeBuilding;
+
+          // Фон ячейки — без border-left, только background
+          if (cellIsBlackout) {
+            cell.style.background = 'rgba(192,57,43,0.10)';
+            cell.style.borderColor = 'rgba(192,57,43,0.45)';
+          }
+
+          const chip = document.createElement('div');
+          chip.className = 'cell-duty-chip';
+          // Оранжевый фон чипа при запросе замены
+          if (cellIsReplace) chip.classList.add('duty-chip--replace');
+
           const av = document.createElement('div'); av.className='cell-duty-avatar'; av.style.background=color; av.textContent=initials(t.name);
           av.addEventListener('click', e => { e.stopPropagation(); openTeacherInfoModal(first.tid); });
           const nameEl = document.createElement('div'); nameEl.className='cell-duty-name'; nameEl.textContent=t.name;
           chip.appendChild(av); chip.appendChild(nameEl);
-          // Кнопка «Отклонить н/д» — если дежурный имеет blackout И он из активного корпуса
-          const firstHasBlackout = (State.blackoutDates[first.tid] || []).includes(key) &&
-            (teacherById(first.tid)?.building || '1') === State.activeBuilding;
-          if (firstHasBlackout) {
-            const dBtn = document.createElement('button');
-            dBtn.className = 'cell-blackout-decline';
-            dBtn.textContent = '⚠️ Отклонить';
-            dBtn.title = 'Отклонить нежелательный день';
-            dBtn.addEventListener('click', e => { e.stopPropagation(); declineBlackoutDate(key, first.tid); });
-            chip.appendChild(dBtn);
+
+          // Бейдж замены — как на скриншоте 3
+          if (cellIsReplace) {
+            const rBadge = document.createElement('button');
+            rBadge.className = 'cell-action-badge cell-action-badge--replace';
+            rBadge.textContent = '🔄 Отклонить';
+            rBadge.title = 'Отклонить запрос на замену';
+            rBadge.addEventListener('click', e => { e.stopPropagation(); declineReplaceRequest(key); });
+            chip.appendChild(rBadge);
           }
+
+          // Бейдж нежелательного дня — как на скриншоте 3
+          if (cellIsBlackout) {
+            const bBadge = document.createElement('button');
+            bBadge.className = 'cell-action-badge cell-action-badge--blackout';
+            bBadge.textContent = '⚠️ Отклонить';
+            bBadge.title = 'Отклонить нежелательный день';
+            bBadge.addEventListener('click', e => { e.stopPropagation(); declineBlackoutDate(key, first.tid); });
+            chip.appendChild(bBadge);
+          }
+
           cell.appendChild(chip);
           if (dutyEntries.length > 1) {
             const more = document.createElement('div'); more.className='cell-duty-more'; more.textContent=`+${dutyEntries.length-1}`;
@@ -588,11 +607,11 @@ function quickClear(key) {
   renderCalendar(); renderAccordion(); renderTeachersList(); renderStats(); renderMyCabinet();
   showToast('Дежурство снято', 'info');
 }
-function toggleReplaceRequest(key) {
+function toggleReplaceRequest(key, isWorkday = false) {
   const tid = State.currentTeacherId;
   const ids = getDutyIds(key);
-  // Только если этот преподаватель стоит в дежурстве
-  if (!tid || !ids.includes(tid)) { showToast('Вы не дежурите в этот день', 'error'); return; }
+  // Для рабочих дней (пар) не требуем наличия в дежурстве
+  if (!tid || (!isWorkday && !ids.includes(tid))) { showToast('Вы не дежурите в этот день', 'error'); return; }
   const teacher = teacherById(tid);
   if (!teacher) return;
   const [, mm, dd] = key.split('-');
@@ -1652,9 +1671,6 @@ function renderTeachersList() {
     return;
   }
   const maxD = getWorkdaysInMonth();
-  const _blY = State.currentDate.getFullYear();
-  const _blM = State.currentDate.getMonth();
-  const _blPrefix = `${_blY}-${String(_blM+1).padStart(2,'0')}`;
   const byBuilding = { '1': [], '2': [], '3': [] };
   State.teachers.forEach((t, idx) => { const b = t.building || '1'; if (!byBuilding[b]) byBuilding[b] = []; byBuilding[b].push({ t, idx }); });
   container.innerHTML = ['1','2','3'].map(b => `
@@ -1678,20 +1694,12 @@ function renderTeachersList() {
                 ${byBuilding[b].map(({ t, idx }) => {
                   const color = getColor(idx);
                   const dc = getMonthDutyCount(t.id);
-                  const blDatesThisMonth = (State.blackoutDates[t.id] || []).filter(k => k.startsWith(_blPrefix));
-                  const hasBlackoutMonth = blDatesThisMonth.length > 0;
-                  const declineBtnsHtml = hasBlackoutMonth && State.currentRole === 'admin'
-                    ? blDatesThisMonth.map(k => {
-                        const [,mm,dd] = k.split('-');
-                        return `<button onclick="event.stopPropagation();declineBlackoutDate('${k}','${t.id}')" style="font-size:.6rem;padding:1px 7px;background:#922b21;color:#fff;border:none;border-radius:4px;cursor:pointer;margin-left:3px;white-space:nowrap">⚠️ ${parseInt(dd)}.${mm} Отклонить</button>`;
-                      }).join('')
-                    : '';
                   return `
-                    <tr style="${hasBlackoutMonth ? 'background:rgba(192,57,43,0.08);' : ''}">
+                    <tr>
                       <td>
-                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                          <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;color:#fff;flex-shrink:0;${hasBlackoutMonth ? 'outline:2px solid rgba(192,57,43,0.5);outline-offset:1px;' : ''}">${initials(t.name)}</div>
-                          <span style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name}</span>${hasBlackoutMonth ? `<span style="font-size:.65rem;color:#c0392b;font-family:var(--font-mono)">⚠️</span>` : ''}${declineBtnsHtml}
+                        <div style="display:flex;align-items:center;gap:8px">
+                          <div style="width:28px;height:28px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:700;color:#fff;flex-shrink:0">${initials(t.name)}</div>
+                          <span style="font-size:.82rem;font-weight:600;color:var(--navy)">${t.name}</span>
                         </div>
                       </td>
                       <td style="font-size:.75rem;color:var(--text-muted)">${t.dept}</td>
@@ -1848,18 +1856,18 @@ function renderMyCabinet() {
     }).join('');
     listEl.querySelectorAll('[data-key]').forEach(btn => { btn.addEventListener('click', () => toggleReplaceRequest(btn.dataset.key)); });
   }
-  // ── РАБОЧИЕ ДНИ (пары в этом месяце) ──
+  // ── РАБОЧИЕ ДНИ ──
   const workDaysEl = document.getElementById('myWorkDaysList');
   if (workDaysEl && tid) {
     const tTeacher = teacherById(tid);
     const tBuilding = tTeacher?.building || '1';
     const myWorkDays = [];
-    Object.keys(State.lessons).forEach(key => {
-      if (!key.startsWith(prefix)) return;
-      const lessons = State.lessons[key];
+    Object.keys(State.lessons).forEach(wKey => {
+      if (!wKey.startsWith(prefix)) return;
+      const lessons = State.lessons[wKey];
       for (let pn = 1; pn <= 6; pn++) {
         if ((lessons[pn] || []).some(e => e.tid === tid && e.building === tBuilding)) {
-          myWorkDays.push(key); return;
+          myWorkDays.push(wKey); return;
         }
       }
     });
@@ -1867,21 +1875,21 @@ function renderMyCabinet() {
     if (myWorkDays.length === 0) {
       workDaysEl.innerHTML = `<div class="empty-state" style="padding:1.5rem"><div class="empty-icon">📗</div><p class="empty-title">Нет рабочих дней</p></div>`;
     } else {
-      workDaysEl.innerHTML = myWorkDays.map(key => {
-        const d = new Date(key + 'T00:00:00');
+      workDaysEl.innerHTML = myWorkDays.map(wKey => {
+        const d = new Date(wKey + 'T00:00:00');
         const dayStr = `${d.getDate()} ${MONTHS_RU_GEN[d.getMonth()]}`;
-        const isReq = State.replaceRequests[key]?.tid === tid;
-        const isDeclined = !isReq && !!(State.declinedRequests?.[key]);
+        const isReq = State.replaceRequests[wKey]?.tid === tid;
+        const isDeclined = !isReq && !!(State.declinedRequests?.[wKey]);
         return `<div class="my-duty-row my-workday-row">
           <div class="my-duty-date">${dayStr}, ${DAYS_SHORT[d.getDay()]}</div>
-          <div class="my-duty-status${isReq ? ' replace' : isDeclined ? ' declined' : ''}" style="color:var(--green);font-weight:600">${isReq ? '🔄 Запрошена замена' : isDeclined ? '❌ Замена отклонена' : '📗 Рабочий день'}</div>
-          <button class="my-duty-action workday-replace-btn${isReq ? ' cancel' : ''}" data-key="${key}">
+          <div class="my-duty-status workday-status${isReq ? ' replace' : isDeclined ? ' declined' : ''}">${isReq ? '🔄 Запрошена замена' : isDeclined ? '❌ Замена отклонена' : '📗 Рабочий день'}</div>
+          <button class="my-duty-action workday-replace-btn${isReq ? ' cancel' : ''}" data-wkey="${wKey}">
             ${isReq ? 'Отменить' : '🔄 Запросить замену'}
           </button>
         </div>`;
       }).join('');
-      workDaysEl.querySelectorAll('[data-key]').forEach(btn => {
-        btn.addEventListener('click', () => toggleReplaceRequest(btn.dataset.key));
+      workDaysEl.querySelectorAll('[data-wkey]').forEach(btn => {
+        btn.addEventListener('click', () => toggleReplaceRequest(btn.dataset.wkey, true));
       });
     }
   }
@@ -1901,7 +1909,6 @@ function renderMyCabinet() {
       b.addEventListener('click', () => {
         State.blackoutDates[tid] = (State.blackoutDates[tid] || []).filter(k => k !== b.dataset.k);
         State.save();
-        // Сохраняем удаление в Supabase
         const rmTeacher = teacherById(tid);
         if (rmTeacher) { rmTeacher.blackoutDates = State.blackoutDates[tid]; if (sb) saveTeachers(rmTeacher); }
         renderMyCabinet(); renderCalendar(); renderAccordion(); renderTeachersList();
@@ -1920,7 +1927,6 @@ function addBlackoutDate() {
   if (State.blackoutDates[tid].includes(val)) { showToast('Уже добавлено', 'info'); return; }
   State.blackoutDates[tid].push(val);
   State.save();
-  // Сохраняем в Supabase
   const blTeacher = teacherById(tid);
   if (blTeacher) { blTeacher.blackoutDates = State.blackoutDates[tid]; if (sb) saveTeachers(blTeacher); }
   input.value = '';
@@ -1928,7 +1934,6 @@ function addBlackoutDate() {
   showToast('Нежелательная дата добавлена', 'success');
 }
 // ─── DECLINE BLACKOUT DATE ────────────────────────────────────────────────────
-// Вызывается ТОЛЬКО завучем; уведомление уходит ТОЛЬКО этому преподавателю
 async function declineBlackoutDate(key, tid) {
   const teacher = teacherById(tid);
   if (!teacher) return;

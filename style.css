@@ -2068,46 +2068,108 @@ body[data-role="teacher"] .mob-nav-btn[data-tab="cabinet"] { display: none !impo
     width: 100%;
   }
 }
-/* ── Admin: ячейка с нежелательным днём (вид завуча) ── */
-.day-cell--admin-blackout {
-  background: rgba(192,57,43,.10) !important;
-  border-color: rgba(192,57,43,.55) !important;
+
+/* ═══════════════════════════════════════════════
+   CABINET: сворачиваемые карточки
+   ═══════════════════════════════════════════════ */
+.cabinet-collapsible { padding: 0 !important; overflow: hidden; }
+
+.cabinet-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: .9rem 1.1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  gap: .5rem;
+  font-size: 1rem;
+}
+.cabinet-toggle:hover { background: var(--surface-hover, rgba(0,0,0,.03)); }
+
+.cabinet-toggle-title {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--navy, #1e293b);
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  flex: 1;
+  text-align: left;
 }
 
-/* Кнопка «Отклонить» нежелательного дня внутри chip ячейки */
-.cell-blackout-decline {
+.cabinet-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform .2s ease;
+}
+
+.cabinet-body { /* открыто по умолчанию */ }
+
+/* ═══════════════════════════════════════════════
+   CALENDAR CELL: action badges (замена / н/д)
+   — стиль как на скриншоте 3 (маленький цветной бейдж)
+   ═══════════════════════════════════════════════ */
+.cell-action-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-size: .58rem;
   padding: 2px 7px;
-  background: #922b21;
-  color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   margin-left: 4px;
-  line-height: 1.6;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: background .15s;
+  font-weight: 600;
+  line-height: 1.6;
+  transition: filter .15s;
 }
-.cell-blackout-decline:hover { background: #c0392b; }
+.cell-action-badge:hover { filter: brightness(1.12); }
 
-/* Рабочие дни — зелёная строка в кабинете преподавателя */
+.cell-action-badge--replace {
+  background: var(--orange, #f5a623);
+  color: #fff;
+}
+.cell-action-badge--blackout {
+  background: #922b21;
+  color: #fff;
+}
+
+/* Убираем border-left красную полосу у замены — оставляем только фон */
+.day-cell--replace-req {
+  border-left: none !important;
+  background: rgba(230,126,34,.08) !important;
+  border-color: rgba(230,126,34,.45) !important;
+}
+.day-cell--today.day-cell--replace-req {
+  border-left: none !important;
+}
+
+/* Workday кнопка замены */
+.workday-replace-btn {
+  border-color: rgba(46,160,100,0.5) !important;
+  color: var(--green, #27ae60) !important;
+}
+.workday-replace-btn:hover {
+  background: rgba(46,160,100,0.1) !important;
+  border-color: var(--green, #27ae60) !important;
+}
+.workday-replace-btn.cancel {
+  border-color: var(--orange, #f5a623) !important;
+  color: var(--orange, #f5a623) !important;
+}
+
+/* Зелёный статус рабочего дня */
+.workday-status { color: var(--green, #27ae60) !important; font-weight: 600; }
+.workday-status.replace { color: var(--orange, #f5a623) !important; }
+.workday-status.declined { color: #c0392b !important; }
+
+/* Рабочие дни строка */
 .my-workday-row {
   border-color: rgba(46,160,100,0.35) !important;
   background: rgba(46,160,100,0.05) !important;
 }
 .my-workday-row:hover { border-color: rgba(46,160,100,0.6) !important; }
-
-/* Кнопка замены в «Рабочих днях» — чуть меньше акцент */
-.workday-replace-btn {
-  border-color: rgba(46,160,100,0.5) !important;
-  color: var(--green) !important;
-}
-.workday-replace-btn:hover {
-  background: rgba(46,160,100,0.1) !important;
-  border-color: var(--green) !important;
-}
-.workday-replace-btn.cancel {
-  border-color: var(--orange) !important;
-  color: var(--orange) !important;
-}
