@@ -384,30 +384,14 @@
     <!-- ★ MY CABINET tab (teacher mode) -->
     <section class="tab-panel teacher-only" id="tab-cabinet" role="tabpanel">
       <div class="cabinet-layout">
-        <div style="display:flex;flex-direction:column;gap:1.25rem;">
-          <!-- Мои дежурства — сворачиваемая карточка -->
-          <div class="card cabinet-collapsible">
-            <button class="cabinet-toggle" aria-expanded="true" data-target="myDutiesBody">
-              <span class="cabinet-toggle-title">
-                📅 Мои дежурства в этом месяце
-                <span id="cabinetTeacherName" style="font-size:.78rem;color:var(--text-muted);font-family:var(--font-mono);margin-left:6px;font-weight:400"></span>
-              </span>
-              <svg class="cabinet-chevron" viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <div class="cabinet-body" id="myDutiesBody">
-              <div class="my-duties-list" id="myDutiesList"></div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Мои дежурства в этом месяце</h3>
+              <div id="cabinetTeacherName" style="font-size:.8rem;color:var(--text-muted);font-family:var(--font-mono);margin-top:2px"></div>
             </div>
           </div>
-          <!-- Рабочие дни — сворачиваемая карточка -->
-          <div class="card cabinet-collapsible">
-            <button class="cabinet-toggle" aria-expanded="true" data-target="myWorkDaysBody">
-              <span class="cabinet-toggle-title">📗 Рабочие дни в этом месяце</span>
-              <svg class="cabinet-chevron" viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <div class="cabinet-body" id="myWorkDaysBody">
-              <div class="my-duties-list" id="myWorkDaysList"></div>
-            </div>
-          </div>
+          <div class="my-duties-list" id="myDutiesList"></div>
         </div>
         <div class="card">
           <div class="card-header"><h3 class="card-title">🚫 Нежелательные даты</h3></div>
@@ -531,18 +515,5 @@
   <div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
   <script src="app.js"></script>
-  <script>
-    document.addEventListener('click', function(e) {
-      const btn = e.target.closest('.cabinet-toggle');
-      if (!btn) return;
-      const targetId = btn.dataset.target;
-      const body = document.getElementById(targetId);
-      if (!body) return;
-      const isOpen = btn.getAttribute('aria-expanded') === 'true';
-      btn.setAttribute('aria-expanded', String(!isOpen));
-      body.style.display = isOpen ? 'none' : '';
-      btn.querySelector('.cabinet-chevron').style.transform = isOpen ? 'rotate(-90deg)' : '';
-    });
-  </script>
 </body>
 </html>
